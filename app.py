@@ -157,11 +157,19 @@ with tab_studio:
                                 paste_y = (new_h - orig_h) // 2
                                 padded_base_pil.paste(original_base_pil, (paste_x, paste_y))
                                 
-                                # 将补好白边的图转为 base64 发给 AI
+                                # ==========================================
+                                # 🌟 新增：智能画质压缩引擎 (目标约 1MB)
+                                # ==========================================
+                                # 限制最大边长为 1920 像素，完美保留建筑线条锐利度，同时杜绝 API 超时崩溃
+                                max_size = 1920
+                                if padded_base_pil.width > max_size or padded_base_pil.height > max_size:
+                                    padded_base_pil.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+                                
                                 buffered = io.BytesIO()
-                                padded_base_pil.save(buffered, format="JPEG", quality=95)
+                                # quality=85 是视觉无损和体积压缩的最佳黄金分割点
+                                padded_base_pil.save(buffered, format="JPEG", quality=85)
                                 payload_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
-                                st.toast("🛡️ 已自动填充画幅白边，100% 保护原图不被裁切！")
+                                st.toast("🛡️ 1MB智能压缩 + 防裁切白边引擎双重启动！")
                             else:
                                 payload_base64 = base64_image # 比例极其完美，不需要动刀
 
@@ -349,4 +357,5 @@ with tab_gallery:
                             st.rerun() 
 
                     with st.expander(f"📝 查看咒语指令 (Prompt)"):
+
                         st.code(f"{saved_prompt}")
