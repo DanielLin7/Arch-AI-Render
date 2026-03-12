@@ -2,3 +2,4 @@ streamlit
 requests
 Pillow
 streamlit-image-comparison
+streamlit-drawable-canvas
