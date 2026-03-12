@@ -2,9 +2,10 @@ import streamlit as st
 import base64
 import os
 import requests
-from PIL import Image
+from PIL import Image, ImageOps
 import io
 import datetime
+import json
 
 # ==========================================
 # 0. 页面基础配置
@@ -42,17 +43,17 @@ if not check_password():
 # ==========================================
 # 🚀 核心渲染工作区
 # ==========================================
-
-# os.environ['http_proxy'] = 'http://127.0.0.1:7890'
-# os.environ['https_proxy'] = 'http://127.0.0.1:7890'
-
 HISTORY_DIR = "render_history"
 os.makedirs(HISTORY_DIR, exist_ok=True)
 
-# ⚠️ 从云端金库中安全读取密钥
-API_KEY = st.secrets["GEMINI_API_KEY"]
+# ⚠️ 从云端金库安全读取 API Key
+try:
+    API_KEY = st.secrets["GEMINI_API_KEY"]
+except KeyError:
+    st.error("⚠️ 未检测到云端 Secrets，请确保已在 Advanced settings 中配置 GEMINI_API_KEY。")
+    st.stop()
 
-st.title("🏗️ 建筑效果图 AI 渲染引擎 / Architecture AI Render v5.7")
+st.title("🏗️ 建筑效果图 AI 渲染引擎 / Architecture AI Render v5.8")
 st.markdown("---")
 
 tab_studio, tab_gallery = st.tabs(["🎨 工作台 / Studio", "🖼️ 历史资产库 / Gallery"])
@@ -66,14 +67,12 @@ with tab_studio:
     with col_ctrl:
         st.subheader("1. 底图 / Base Image")
         uploaded_file = st.file_uploader("上传白模或线稿 / Upload Sketch", type=['png', 'jpg', 'jpeg'])
-        base64_image = ""
         original_base_pil = None 
         
         if uploaded_file is not None:
             st.image(uploaded_file, caption="原始底图 / Original Base", use_container_width=True)
             image_bytes = uploaded_file.getvalue()
-            base64_image = base64.b64encode(image_bytes).decode('utf-8')
-            # 转换为 RGB，防止透明背景的 PNG 引发错误
+            # 强制转为 RGB，防止部分带透明通道的 PNG 报错
             original_base_pil = Image.open(io.BytesIO(image_bytes)).convert("RGB") 
 
         st.subheader("2. 风格与指令 / Style & Prompt")
@@ -86,7 +85,8 @@ with tab_studio:
         selected_style = st.selectbox("选择风格 / Select Style", list(style_presets.keys()), label_visibility="collapsed")
         prompt = style_presets[selected_style]
         if selected_style == "✍️ 自定义 / Custom Prompt":
-            prompt = st.text_area("输入英文指令 / Enter Prompt:", value="")
+            prompt = st.text_area("输入指令 (建议用英文) / Enter Prompt:", value="")
+            st.caption("💡 提示：AI 引擎对英文指令理解更精准，且请尽量**避免要求生成人物**以防触发安全拦截。")
 
         st.subheader("3. 画幅与精度 / Settings")
         aspect_ratio = st.radio(
@@ -125,50 +125,21 @@ with tab_studio:
                                 r_val = img_w / img_h
                                 ratios = {"16:9": 16/9, "9:16": 9/16, "1:1": 1.0, "4:3": 4/3, "3:4": 3/4}
                                 ar_val = min(ratios, key=lambda k: abs(ratios[k] - r_val))
-                                st.toast(f"📐 已智能匹配最佳画幅: {ar_val}")
                             else:
                                 ar_val = aspect_ratio.split(" ")[0]
-                                
+                            
                             q_val = quality.split(" ")[0]
                             
                             # ==========================================
-                            # 🌟 核心修复引擎：防裁切智能白边填充 (Letterboxing)
+                            # 🌟 V5.8 核心引擎：智能补白 + 全局压缩防崩溃
                             # ==========================================
+                            final_pil = original_base_pil.copy()
                             target_w_ratio, target_h_ratio = map(int, ar_val.split(':'))
                             target_ratio_float = target_w_ratio / target_h_ratio
-                            orig_w, orig_h = original_base_pil.size
+                            orig_w, orig_h = final_pil.size
                             orig_ratio_float = orig_w / orig_h
 
-                            # 容差范围内的微小差异直接忽略，否则开始智能补边
-                            if abs(target_ratio_float - orig_ratio_float) > 0.01:
-                                if target_ratio_float > orig_ratio_float: 
-                                    # 目标更宽，需要左右加白边
-                                    new_w = int(orig_h * target_ratio_float)
-                                    new_h = orig_h
-                                else: 
-                                    # 目标更窄，需要上下加白边
-                                    new_w = orig_w
-                                    new_h = int(orig_w / target_ratio_float)
-                                
-                                # 创建纯白色的“画布底板”
-                                padded_base_pil = Image.new("RGB", (new_w, new_h), (255, 255, 255))
-                                # 把原图贴在正中间
-                                paste_x = (new_w - orig_w) // 2
-                                paste_y = (new_h - orig_h) // 2
-                                padded_base_pil.paste(original_base_pil, (paste_x, paste_y))
-                                
-                            # ==========================================
-                            # 🌟 核心修复引擎：防裁切 + 全局智能压缩
-                            # ==========================================
-                            target_w_ratio, target_h_ratio = map(int, ar_val.split(':'))
-                            target_ratio_float = target_w_ratio / target_h_ratio
-                            orig_w, orig_h = original_base_pil.size
-                            orig_ratio_float = orig_w / orig_h
-
-                            # 先把原图赋给一个终极变量
-                            final_pil = original_base_pil
-
-                            # 1. 智能白边填充 (Letterboxing)
+                            # A. 智能补白边防裁切
                             if abs(target_ratio_float - orig_ratio_float) > 0.01:
                                 if target_ratio_float > orig_ratio_float: 
                                     new_w = int(orig_h * target_ratio_float)
@@ -177,13 +148,13 @@ with tab_studio:
                                     new_w = orig_w
                                     new_h = int(orig_w / target_ratio_float)
                                 
-                                final_pil = Image.new("RGB", (new_w, new_h), (255, 255, 255))
+                                padded_pil = Image.new("RGB", (new_w, new_h), (255, 255, 255))
                                 paste_x = (new_w - orig_w) // 2
                                 paste_y = (new_h - orig_h) // 2
-                                final_pil.paste(original_base_pil, (paste_x, paste_y))
-                                st.toast("🛡️ 已自动填充画幅白边！")
+                                padded_pil.paste(final_pil, (paste_x, paste_y))
+                                final_pil = padded_pil
                             
-                            # 2. 全局 1MB 级智能压缩 (无论是否补白边，统统压缩！)
+                            # B. 全局智能压缩引擎 (限制最大边长 1920，JPEG 85 画质，目标 1MB 级别)
                             max_size = 1920
                             if final_pil.width > max_size or final_pil.height > max_size:
                                 final_pil.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
@@ -191,8 +162,8 @@ with tab_studio:
                             buffered = io.BytesIO()
                             final_pil.save(buffered, format="JPEG", quality=85)
                             payload_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
-                            
-                            # 2. 发送精准调校过的数据包
+
+                            # 2. 发送请求
                             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent?key={API_KEY}"
                             headers = {'Content-Type': 'application/json'}
                             payload = {
@@ -204,39 +175,53 @@ with tab_studio:
 
                             if response.status_code == 200:
                                 result = response.json()
-                                output_b64 = result['candidates'][0]['content']['parts'][0]['inlineData']['data']
-                                image_data = base64.b64decode(output_b64)
                                 
-                                raw_ai_image = Image.open(io.BytesIO(image_data))
-                                img_width, img_height = raw_ai_image.size
-                                
-                                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                                img_filename = os.path.join(HISTORY_DIR, f"render_{timestamp}.png")
-                                txt_filename = os.path.join(HISTORY_DIR, f"render_{timestamp}.txt")
-                                
-                                raw_ai_image.save(img_filename)
-                                with open(txt_filename, "w", encoding="utf-8") as f:
-                                    f.write(f"【Settings】AR: {ar_val} | Res: {q_val} | Size: {img_width}x{img_height}\n【Prompt】{prompt}\n")
+                                # ==========================================
+                                # 🌟 V5.8 安全预警拦截系统
+                                # ==========================================
+                                try:
+                                    output_b64 = result['candidates'][0]['content']['parts'][0]['inlineData']['data']
+                                    image_data = base64.b64decode(output_b64)
                                     
-                                st.success(f"🎉 渲染完成 / Success! ({img_width} x {img_height} px)")
-                                st.image(raw_ai_image, caption=f"AI 渲染成品 | {img_width} x {img_height}", use_container_width=True)
-                                
-                                with open(img_filename, "rb") as file:
-                                    st.download_button(
-                                        label="⬇️ 保存当前渲染图 / Download Image",
-                                        data=file,
-                                        file_name=f"render_{timestamp}.png",
-                                        mime="image/png",
-                                        use_container_width=True
-                                    )
-                                
-                                st.session_state['last_render'] = {'prompt': prompt, 'output_b64': output_b64, 'ar_val': ar_val, 'quality': q_val}
-                                
+                                    raw_ai_image = Image.open(io.BytesIO(image_data))
+                                    img_width, img_height = raw_ai_image.size
+                                    
+                                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                                    img_filename = os.path.join(HISTORY_DIR, f"render_{timestamp}.png")
+                                    txt_filename = os.path.join(HISTORY_DIR, f"render_{timestamp}.txt")
+                                    
+                                    raw_ai_image.save(img_filename)
+                                    with open(txt_filename, "w", encoding="utf-8") as f:
+                                        f.write(f"【Settings】AR: {ar_val} | Res: {q_val} | Size: {img_width}x{img_height}\n【Prompt】{prompt}\n")
+                                        
+                                    st.success(f"🎉 渲染完成 / Success! ({img_width} x {img_height} px)")
+                                    st.image(raw_ai_image, caption=f"AI 渲染成品 | {img_width} x {img_height}", use_container_width=True)
+                                    
+                                    with open(img_filename, "rb") as file:
+                                        st.download_button(
+                                            label="⬇️ 保存当前渲染图 / Download Image",
+                                            data=file,
+                                            file_name=f"render_{timestamp}.png",
+                                            mime="image/png",
+                                            use_container_width=True
+                                        )
+                                    
+                                    st.session_state['last_render'] = {'prompt': prompt, 'output_b64': output_b64, 'ar_val': ar_val, 'quality': q_val}
+                                    
+                                except KeyError:
+                                    # 如果找不到图片数据，解析具体的拦截原因
+                                    st.error("🚫 渲染被 Google 安全引擎拦截！(Safety Filter Triggered)")
+                                    st.warning("💡 拦截原因：您的指令或图片可能触发了『敏感内容限制』。建筑渲染中，**最常见的原因是要求生成人物/人脸，或者原图中有疑似血腥、暴力的几何错觉。**\n\n**建议解决办法：**\n1. 删掉指令中的“人、小孩、街道人群”等词汇。\n2. 使用纯英文重新描述建筑。")
+                                    with st.expander("🔍 查看云端原始拦截报告"):
+                                        st.json(result)
                             else:
                                 st.error(f"❌ 失败 / Failed! Status: {response.status_code}")
+                                with st.expander("查看详情"):
+                                    st.text(response.text)
                         except Exception as e:
                             st.error(f"🌐 错误 / Error: {e}")
 
+        # 图生图 4K 深化模块
         if 'last_render' in st.session_state and st.session_state['last_render']['quality'] in ["512", "1K"]:
             st.divider()
             st.info("💡 满意当前光影？点击下方按钮直升 4K / Satisfied with lighting? Upscale to 4K instants.")
@@ -255,39 +240,42 @@ with tab_studio:
 
                             if response.status_code == 200:
                                 result = response.json()
-                                output_b64 = result['candidates'][0]['content']['parts'][0]['inlineData']['data']
-                                image_data = base64.b64decode(output_b64)
-                                
-                                raw_ai_4k_image = Image.open(io.BytesIO(image_data))
-                                img_width, img_height = raw_ai_4k_image.size
-                                
-                                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                                img_filename = os.path.join(HISTORY_DIR, f"render_4K_upscaled_{timestamp}.png")
-                                txt_filename = os.path.join(HISTORY_DIR, f"render_4K_upscaled_{timestamp}.txt")
-                                
-                                raw_ai_4k_image.save(img_filename)
-                                with open(txt_filename, "w", encoding="utf-8") as f:
-                                    f.write(f"【Settings】AR: {last['ar_val']} | Res: 4K | Size: {img_width}x{img_height}\n【Prompt】{last['prompt']}\n")
+                                try:
+                                    output_b64 = result['candidates'][0]['content']['parts'][0]['inlineData']['data']
+                                    image_data = base64.b64decode(output_b64)
                                     
-                                st.success(f"🎆 4K 深化成功！ / Upscale Complete! ({img_width}x{img_height})")
-                                st.image(raw_ai_4k_image, caption=f"4K 终极渲染 | {img_width} x {img_height}", use_container_width=True)
-                                
-                                with open(img_filename, "rb") as file:
-                                    st.download_button(
-                                        label="⬇️ 保存 4K 极限大图 / Download 4K Ultra-HD",
-                                        data=file,
-                                        file_name=f"render_4K_upscaled_{timestamp}.png",
-                                        mime="image/png",
-                                        type="primary",
-                                        use_container_width=True
-                                    )
+                                    raw_ai_4k_image = Image.open(io.BytesIO(image_data))
+                                    img_width, img_height = raw_ai_4k_image.size
+                                    
+                                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                                    img_filename = os.path.join(HISTORY_DIR, f"render_4K_upscaled_{timestamp}.png")
+                                    txt_filename = os.path.join(HISTORY_DIR, f"render_4K_upscaled_{timestamp}.txt")
+                                    
+                                    raw_ai_4k_image.save(img_filename)
+                                    with open(txt_filename, "w", encoding="utf-8") as f:
+                                        f.write(f"【Settings】AR: {last['ar_val']} | Res: 4K | Size: {img_width}x{img_height}\n【Prompt】{last['prompt']}\n")
+                                        
+                                    st.success(f"🎆 4K 深化成功！ / Upscale Complete! ({img_width}x{img_height})")
+                                    st.image(raw_ai_4k_image, caption=f"4K 终极渲染 | {img_width} x {img_height}", use_container_width=True)
+                                    
+                                    with open(img_filename, "rb") as file:
+                                        st.download_button(
+                                            label="⬇️ 保存 4K 极限大图 / Download 4K Ultra-HD",
+                                            data=file,
+                                            file_name=f"render_4K_upscaled_{timestamp}.png",
+                                            mime="image/png",
+                                            type="primary",
+                                            use_container_width=True
+                                        )
+                                except KeyError:
+                                    st.error("🚫 4K 深化被 Google 安全引擎拦截！(提示：请勿在指令中涉及人物生成)")
                             else:
                                 st.error("❌ 失败 / Failed!")
                         except Exception as e:
                             st.error(f"🌐 错误 / Error: {e}")
 
 # ------------------------------------------
-# Tab 2: 历史画廊 (向下兼容代码不变)
+# Tab 2: 历史画廊
 # ------------------------------------------
 with tab_gallery:
     st.subheader("📁 历史资产库 / History Assets")
@@ -358,15 +346,21 @@ with tab_gallery:
                                         payload = {"contents": [{"parts": [{"text": saved_prompt}, {"inline_data": {"mime_type": "image/jpeg", "data": history_b64}}]}], "generationConfig": {"imageConfig": {"aspectRatio": saved_ar, "imageSize": "4K"}}}
                                         response = requests.post(url, headers={'Content-Type': 'application/json'}, json=payload, timeout=180)
                                         if response.status_code == 200:
-                                            new_img_data = base64.b64decode(response.json()['candidates'][0]['content']['parts'][0]['inlineData']['data'])
-                                            new_image = Image.open(io.BytesIO(new_img_data))
-                                            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                                            new_image.save(os.path.join(HISTORY_DIR, f"render_4K_up_{ts}.png"))
-                                            with open(os.path.join(HISTORY_DIR, f"render_4K_up_{ts}.txt"), "w", encoding="utf-8") as f:
-                                                f.write(f"【Settings】AR: {saved_ar} | Res: 4K | Size: {new_image.size[0]}x{new_image.size[1]}\n【Prompt】{saved_prompt}\n")
-                                            st.success("✅ 完成 / Done! 刷新查看 / Refresh to see.")
+                                            result = response.json()
+                                            try:
+                                                new_img_data = base64.b64decode(result['candidates'][0]['content']['parts'][0]['inlineData']['data'])
+                                                new_image = Image.open(io.BytesIO(new_img_data))
+                                                ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                                                new_image.save(os.path.join(HISTORY_DIR, f"render_4K_up_{ts}.png"))
+                                                with open(os.path.join(HISTORY_DIR, f"render_4K_up_{ts}.txt"), "w", encoding="utf-8") as f:
+                                                    f.write(f"【Settings】AR: {saved_ar} | Res: 4K | Size: {new_image.size[0]}x{new_image.size[1]}\n【Prompt】{saved_prompt}\n")
+                                                st.success("✅ 完成 / Done! 刷新查看 / Refresh to see.")
+                                            except KeyError:
+                                                st.error("🚫 4K 深化被拦截 (敏感指令)")
+                                        else:
+                                            st.error("❌ Failed")
                                     except Exception as e:
-                                        st.error("❌ Failed")
+                                        st.error(f"❌ 错误: {e}")
 
                     with btn_col3:
                         if st.button("🗑️ Del", key=f"del_{file_name}", use_container_width=True):
@@ -376,6 +370,4 @@ with tab_gallery:
                             st.rerun() 
 
                     with st.expander(f"📝 查看咒语指令 (Prompt)"):
-
                         st.code(f"{saved_prompt}")
-
