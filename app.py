@@ -157,22 +157,41 @@ with tab_studio:
                                 paste_y = (new_h - orig_h) // 2
                                 padded_base_pil.paste(original_base_pil, (paste_x, paste_y))
                                 
-                                # ==========================================
-                                # 🌟 新增：智能画质压缩引擎 (目标约 1MB)
-                                # ==========================================
-                                # 限制最大边长为 1920 像素，完美保留建筑线条锐利度，同时杜绝 API 超时崩溃
-                                max_size = 1920
-                                if padded_base_pil.width > max_size or padded_base_pil.height > max_size:
-                                    padded_base_pil.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
-                                
-                                buffered = io.BytesIO()
-                                # quality=85 是视觉无损和体积压缩的最佳黄金分割点
-                                padded_base_pil.save(buffered, format="JPEG", quality=85)
-                                payload_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
-                                st.toast("🛡️ 1MB智能压缩 + 防裁切白边引擎双重启动！")
-                            else:
-                                payload_base64 = base64_image # 比例极其完美，不需要动刀
+                            # ==========================================
+                            # 🌟 核心修复引擎：防裁切 + 全局智能压缩
+                            # ==========================================
+                            target_w_ratio, target_h_ratio = map(int, ar_val.split(':'))
+                            target_ratio_float = target_w_ratio / target_h_ratio
+                            orig_w, orig_h = original_base_pil.size
+                            orig_ratio_float = orig_w / orig_h
 
+                            # 先把原图赋给一个终极变量
+                            final_pil = original_base_pil
+
+                            # 1. 智能白边填充 (Letterboxing)
+                            if abs(target_ratio_float - orig_ratio_float) > 0.01:
+                                if target_ratio_float > orig_ratio_float: 
+                                    new_w = int(orig_h * target_ratio_float)
+                                    new_h = orig_h
+                                else: 
+                                    new_w = orig_w
+                                    new_h = int(orig_w / target_ratio_float)
+                                
+                                final_pil = Image.new("RGB", (new_w, new_h), (255, 255, 255))
+                                paste_x = (new_w - orig_w) // 2
+                                paste_y = (new_h - orig_h) // 2
+                                final_pil.paste(original_base_pil, (paste_x, paste_y))
+                                st.toast("🛡️ 已自动填充画幅白边！")
+                            
+                            # 2. 全局 1MB 级智能压缩 (无论是否补白边，统统压缩！)
+                            max_size = 1920
+                            if final_pil.width > max_size or final_pil.height > max_size:
+                                final_pil.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+                            
+                            buffered = io.BytesIO()
+                            final_pil.save(buffered, format="JPEG", quality=85)
+                            payload_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+                            
                             # 2. 发送精准调校过的数据包
                             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent?key={API_KEY}"
                             headers = {'Content-Type': 'application/json'}
@@ -359,3 +378,4 @@ with tab_gallery:
                     with st.expander(f"📝 查看咒语指令 (Prompt)"):
 
                         st.code(f"{saved_prompt}")
+
