@@ -1,6 +1,5 @@
-streamlit==1.40.0
+streamlit==1.37.0
 requests
 Pillow
-streamlit-image-comparison
 streamlit-drawable-canvas
-
+numpy
