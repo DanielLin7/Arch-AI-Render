@@ -54,7 +54,7 @@ except KeyError:
     st.error("⚠️ 未检测到云端 Secrets，请确保已在 Advanced settings 中配置 GEMINI_API_KEY。")
     st.stop()
 
-st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v6.1")
+st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v6.2")
 st.markdown("---")
 
 tab_studio, tab_gallery = st.tabs(["🎨 局部重绘与工作室 / Inpainting Studio", "🖼️ 历史资产库 / Gallery"])
@@ -73,7 +73,7 @@ with tab_studio:
         if uploaded_file is not None:
             image_bytes = uploaded_file.getvalue()
             original_base_pil = Image.open(io.BytesIO(image_bytes)).convert("RGB") 
-            # 🌟 修复 1：把左侧的底图预览加回来，提供安全感
+            # 🌟 左侧的原图预览
             st.image(original_base_pil, caption="原始底图 / Original Base", use_container_width=True)
 
         st.subheader("2. 重绘模式与指令 / Inpainting Prompt")
@@ -148,7 +148,7 @@ with tab_studio:
                     if is_inpainting:
                         st.info("🖌️ 请在下方图片上**涂抹你希望修改的区域**。涂抹完成后点击左侧『开始渲染』。\nTips: 涂满目标区域，不需要保留细节；确保画板动作为 'freedraw'。")
                         
-                        # 🌟 修复 2：将原图缩小到画板尺寸，防止高分辨率巨无霸把画板撑爆变成白板
+                        # 🌟 修复画板背景图过大撑爆页面的问题
                         canvas_bg = original_base_pil.resize((web_w, web_h), Image.Resampling.LANCZOS)
                         
                         canvas_result = st_canvas(
@@ -163,8 +163,9 @@ with tab_studio:
                             key="inpainting_canvas",
                         )
                     else:
-                        st.image(original_base_pil, caption="输入底图 / Input Base", use_container_width=True)
-                        st.info("当前为全局渲染模式，如需局部重绘，请在左侧开启『模式』。")
+                        # 🌟 删除了全局模式下右侧重复的图片，让界面更专业清爽
+                        st.success("✨ 当前为【全局渲染】模式，原图已在左侧就绪。")
+                        st.info("👈 请在左侧输入风格与指令，然后点击下方『开始渲染』按钮。")
                         canvas_result = None
 
         elif not uploaded_file:
@@ -177,7 +178,7 @@ with tab_studio:
                 st.warning("⚠️ 请先在右侧图片上**涂抹你需要重绘的区域**！")
             else:
                 with viewport_placeholder.container():
-                    with st.spinner("💳 局部重绘融合中，大约需要 15-40 秒... / Generating Inpainting..."):
+                    with st.spinner("💳 算力引擎启动中，大约需要 15-40 秒... / Generating..."):
                         try:
                             q_val = quality.split(" ")[0]
                             img_w, img_h = original_base_pil.size
