@@ -400,4 +400,20 @@ with tab_gallery:
                                         if 'candidates' in result:
                                             try:
                                                 new_img_data = base64.b64decode(result['candidates'][0]['content']['parts'][0]['inlineData']['data'])
-                                                new_
+                                                new_image = Image.open(io.BytesIO(new_img_data))
+                                                save_render_result(new_image, saved_prompt, saved_ar, "4K", "画廊4K深化", HISTORY_DIR)
+                                                st.success("✅ 刷新查看 / Refresh")
+                                            except KeyError:
+                                                st.error("🚫 拦截(敏感)")
+                                        else: st.error("❌ 失败")
+                                    except Exception as e:
+                                        st.error("❌ 错误")
+
+                    with btn_col3:
+                        if st.button("🗑️ Del", key=f"del_{file_name}", use_container_width=True):
+                            os.remove(img_path)
+                            if os.path.exists(txt_path): os.remove(txt_path)
+                            st.rerun() 
+
+                    with st.expander(f"📝 查看咒语"):
+                        st.code(f"{saved_prompt}")
