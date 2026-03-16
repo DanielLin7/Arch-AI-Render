@@ -94,7 +94,7 @@ except KeyError:
     st.error("⚠️ 未检测到云端 Secrets，请确保已在 Advanced settings 中配置 GEMINI_API_KEY。")
     st.stop()
 
-st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v6.8")
+st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v6.9")
 st.markdown("---")
 
 tab_studio, tab_gallery = st.tabs(["🎨 局部重绘与工作室 / Inpainting Studio", "🖼️ 历史资产库 / Gallery"])
@@ -190,20 +190,20 @@ with tab_studio:
                     if is_inpainting:
                         st.info("🖌️ 请在下方图片上**涂抹希望修改的区域**。确保画板动作为 'freedraw'。")
                         
-                        # 🌟 终极防弹显影术：洗掉因 resize 产生的异常状态，重塑带有“身份证”的纯血 PNG
-                        raw_bg = original_base_pil.resize((web_w, web_h), Image.Resampling.LANCZOS).convert("RGBA")
-                        clean_buf = io.BytesIO()
-                        raw_bg.save(clean_buf, format="PNG")
-                        safe_canvas_bg = Image.open(clean_buf)
-                        safe_canvas_bg.load() # 强制读入底层内存，确保 Streamlit 读取时 100% 成功
+                        # 🌟 终极绝杀：物理硬盘落地方案！杜绝一切内存回收导致的白板黑洞
+                        temp_bg_path = os.path.join(HISTORY_DIR, "temp_canvas_bg.png")
+                        raw_bg = original_base_pil.resize((web_w, web_h), Image.Resampling.LANCZOS).convert("RGB")
+                        # 将背景图实实在在地保存在服务器硬盘上
+                        raw_bg.save(temp_bg_path, format="PNG")
                         
-                        st.session_state["_canvas_bg_cache"] = safe_canvas_bg
+                        # 直接命令画板去读取硬盘里的实体文件
+                        disk_bg_image = Image.open(temp_bg_path)
                         
                         canvas_result = st_canvas(
                             fill_color="rgba(255, 0, 0, 0.5)",
                             stroke_width=stroke_width,
                             stroke_color="rgba(255, 0, 0, 0.5)",
-                            background_image=st.session_state["_canvas_bg_cache"],
+                            background_image=disk_bg_image,
                             update_streamlit=True,
                             height=web_h,
                             width=web_w,
