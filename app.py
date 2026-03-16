@@ -8,38 +8,28 @@ import datetime
 import numpy as np
 
 # ==========================================
-# 🌟 终极破壁黑魔法：全局劫持画板底层的 URL 生成器 (智能防弹版)
+# 🌟 终极破壁黑魔法：精准切除画板插件的 URL 生成器
 # 彻底解决 Streamlit Cloud Iframe 跨域导致底图白板的世纪难题
 # ==========================================
 import streamlit_drawable_canvas
 
-def b64_image_to_url(*args, **kwargs):
-    """强制将图片转换为 Base64 实体数据，完全绕过 Streamlit 的网络请求与跨域拦截"""
+def custom_canvas_image_to_url(*args, **kwargs):
+    """专门为画板定制的 Base64 注射器，只接管画板，绝对不影响其他 st.image"""
     img = args[0] if args else kwargs.get("image")
     if img is None:
         return ""
-        
-    # 🛡️ 智能判断 1：如果传入的已经是二进制代码 (bytes)，直接编码放行！
-    if isinstance(img, (bytes, bytearray)):
-        b64_str = base64.b64encode(img).decode("utf-8")
-        return f"data:image/jpeg;base64,{b64_str}"
-        
-    # 🛡️ 智能判断 2：如果是字符串 (比如画廊里的图片路径)，直接原样返回给浏览器读取
-    if isinstance(img, str):
-        return img
-        
-    # 🛡️ 智能判断 3：如果是 PIL 图片实体 (画板底图)，使用黑魔法强制转码注入
+    
     try:
         buffered = io.BytesIO()
+        # 强制用 PNG 格式保留完整通道并转为 Base64
         img.save(buffered, format="PNG")
         b64_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
         return f"data:image/png;base64,{b64_str}"
     except Exception:
         return ""
 
-# ⚡ 史诗级修复：精准定位画板插件内部的别名 (st_image) 并替换！
-if hasattr(streamlit_drawable_canvas, "st_image"):
-    streamlit_drawable_canvas.st_image.image_to_url = b64_image_to_url
+# ⚡ 史诗级修复：没有任何条件判断，直接暴力替换插件内部导入的函数！
+streamlit_drawable_canvas.image_to_url = custom_canvas_image_to_url
     
 from streamlit_drawable_canvas import st_canvas 
 # ==========================================
@@ -130,7 +120,7 @@ except KeyError:
     st.error("⚠️ 未检测到云端 Secrets，请确保已在 Advanced settings 中配置 GEMINI_API_KEY。")
     st.stop()
 
-st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v7.3")
+st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v7.4")
 st.markdown("---")
 
 tab_studio, tab_gallery = st.tabs(["🎨 局部重绘与工作室 / Inpainting Studio", "🖼️ 历史资产库 / Gallery"])
@@ -410,20 +400,4 @@ with tab_gallery:
                                         if 'candidates' in result:
                                             try:
                                                 new_img_data = base64.b64decode(result['candidates'][0]['content']['parts'][0]['inlineData']['data'])
-                                                new_image = Image.open(io.BytesIO(new_img_data))
-                                                save_render_result(new_image, saved_prompt, saved_ar, "4K", "画廊4K深化", HISTORY_DIR)
-                                                st.success("✅ 刷新查看 / Refresh")
-                                            except KeyError:
-                                                st.error("🚫 拦截(敏感)")
-                                        else: st.error("❌ 失败")
-                                    except Exception as e:
-                                        st.error("❌ 错误")
-
-                    with btn_col3:
-                        if st.button("🗑️ Del", key=f"del_{file_name}", use_container_width=True):
-                            os.remove(img_path)
-                            if os.path.exists(txt_path): os.remove(txt_path)
-                            st.rerun() 
-
-                    with st.expander(f"📝 查看咒语"):
-                        st.code(f"{saved_prompt}")
+                                                new_
