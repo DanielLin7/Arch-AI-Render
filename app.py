@@ -14,27 +14,23 @@ from streamlit_drawable_canvas import st_canvas
 st.set_page_config(page_title="Architecture AI Render PRO", layout="wide", initial_sidebar_state="collapsed")
 
 # ==========================================
-# 🛠️ 核心辅助函数 (架构优化: 拒绝重复造轮子)
+# 🛠️ 核心辅助函数
 # ==========================================
 def pil_to_base64(pil_img, format="JPEG", quality=85):
-    """将 PIL 图片转为 Base64 编码"""
     buffered = io.BytesIO()
     pil_img.save(buffered, format=format, quality=quality)
     return base64.b64encode(buffered.getvalue()).decode('utf-8')
 
 def call_gemini_api(api_key, prompt, base_b64, mask_b64=None, aspect_ratio="1:1", image_size="1K"):
-    """统一的 Google Gemini API 呼叫中心"""
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent?key={api_key}"
     headers = {'Content-Type': 'application/json'}
     
     parts = []
     if mask_b64:
-        # 局部重绘请求顺序: 底图 -> 蒙版 -> 咒语
         parts.append({"inline_data": {"mime_type": "image/jpeg", "data": base_b64}})
         parts.append({"inline_data": {"mime_type": "image/jpeg", "data": mask_b64}})
         parts.append({"text": prompt})
     else:
-        # 全局渲染请求顺序: 咒语 -> 底图
         parts.append({"text": prompt})
         parts.append({"inline_data": {"mime_type": "image/jpeg", "data": base_b64}})
         
@@ -44,11 +40,10 @@ def call_gemini_api(api_key, prompt, base_b64, mask_b64=None, aspect_ratio="1:1"
     }
     
     response = requests.post(url, headers=headers, json=payload, timeout=180)
-    response.raise_for_status() # 如果发生网络级错误直接抛出异常
+    response.raise_for_status() 
     return response.json()
 
 def save_render_result(image, prompt, ar_val, q_val, mode_str, history_dir):
-    """统一保存图片和日志配置"""
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     prefix = "inpainting_" if "局部" in mode_str else ("4K_up_" if q_val == "4K" else "global_")
     img_filename = os.path.join(history_dir, f"render_{prefix}{timestamp}.png")
@@ -99,7 +94,7 @@ except KeyError:
     st.error("⚠️ 未检测到云端 Secrets，请确保已在 Advanced settings 中配置 GEMINI_API_KEY。")
     st.stop()
 
-st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v6.3")
+st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v6.4")
 st.markdown("---")
 
 tab_studio, tab_gallery = st.tabs(["🎨 局部重绘与工作室 / Inpainting Studio", "🖼️ 历史资产库 / Gallery"])
@@ -117,7 +112,8 @@ with tab_studio:
         
         if uploaded_file is not None:
             original_base_pil = Image.open(io.BytesIO(uploaded_file.getvalue())).convert("RGB") 
-            st.image(original_base_pil, caption="原始底图 / Original Base", use_container_width=True)
+            # 🌟 终极修复 1：直接给网页投喂上传的原始文件，彻底绕过 PIL 渲染 Bug
+            st.image(uploaded_file, caption="原始底图 / Original Base", use_container_width=True)
 
         st.subheader("2. 重绘模式与指令 / Inpainting Prompt")
         
@@ -179,7 +175,6 @@ with tab_studio:
             with viewport_placeholder.container():
                 col1, col2 = st.columns([100, 1])
                 with col1:
-                    # 智能自适应画板尺寸，防止 4K 巨无霸撑爆网页
                     orig_w, orig_h = original_base_pil.size
                     max_web_w = 700
                     scale_fac = max_web_w / orig_w if orig_w > max_web_w else 1.0
@@ -220,7 +215,6 @@ with tab_studio:
                 with viewport_placeholder.container():
                     with st.spinner("💳 算力引擎运转中，大约需要 15-40 秒... / Generating..."):
                         try:
-                            # 1. 动态比例与精度解析
                             q_val = quality.split(" ")[0]
                             if is_inpainting:
                                 ar_val, q_val = "自动", "2K"
@@ -232,7 +226,6 @@ with tab_studio:
                             else:
                                 ar_val = aspect_ratio.split(" ")[0]
                             
-                            # 2. 启动 1MB 级全局智能压缩
                             base_pil_processed = original_base_pil.copy()
                             if base_pil_processed.width > 2048 or base_pil_processed.height > 2048:
                                 base_pil_processed.thumbnail((2048, 2048), Image.Resampling.LANCZOS)
@@ -240,7 +233,6 @@ with tab_studio:
                             base_payload_64 = pil_to_base64(base_pil_processed)
                             mask_payload_64 = None
 
-                            # 3. 处理蒙版 (如果处于重绘模式)
                             if is_inpainting:
                                 mask_rgba = canvas_result.image_data
                                 mask_pil = Image.fromarray(mask_rgba.astype('uint8'), 'RGBA')
@@ -249,26 +241,24 @@ with tab_studio:
                                 mask_payload_64 = pil_to_base64(final_mask_pil)
                                 st.toast("🛡️ 压缩引擎与蒙版通道就绪！")
 
-                            # 4. 呼叫 Google AI (复用模块化代码)
                             result = call_gemini_api(API_KEY, prompt, base_payload_64, mask_payload_64, ar_val, q_val)
 
-                            # 5. 渲染出图与保存
                             try:
                                 output_b64 = result['candidates'][0]['content']['parts'][0]['inlineData']['data']
-                                raw_ai_image = Image.open(io.BytesIO(base64.b64decode(output_b64)))
+                                image_data = base64.b64decode(output_b64)
+                                raw_ai_image = Image.open(io.BytesIO(image_data))
                                 
-                                # 存图日志模块化
                                 img_filename = save_render_result(raw_ai_image, prompt, ar_val, q_val, inpainting_mode, HISTORY_DIR)
                                 
                                 st.success(f"🎉 渲染成功 / Success! ({raw_ai_image.width} x {raw_ai_image.height} px)")
                                 
                                 col1, col2 = st.columns([100, 1]) 
                                 with col1:
-                                    st.image(raw_ai_image, caption=f"AI 渲染成品 | {raw_ai_image.width}x{raw_ai_image.height}", use_container_width=True)
+                                    # 🌟 终极修复 2：直接投喂解码后的二进制字节，绝对不会报错！
+                                    st.image(image_data, caption=f"AI 渲染成品 | {raw_ai_image.width}x{raw_ai_image.height}", use_container_width=True)
                                     with open(img_filename, "rb") as file:
                                         st.download_button("⬇️ 保存当前高清大图", data=file, file_name=os.path.basename(img_filename), mime="image/png", use_container_width=True)
                                 
-                                # 缓存状态供 4K 升级使用
                                 st.session_state['last_render'] = {'prompt': prompt, 'output_b64': output_b64, 'ar_val': ar_val, 'quality': q_val}
                                 
                             except KeyError:
@@ -292,17 +282,18 @@ with tab_studio:
                     with st.spinner("💳 4K 深化算力运转中，请耐心等待 1-2 分钟..."):
                         try:
                             last = st.session_state['last_render']
-                            # 复用模块呼叫 API
                             result = call_gemini_api(API_KEY, last['prompt'], last['output_b64'], mask_b64=None, aspect_ratio=last['ar_val'], image_size="4K")
 
                             try:
                                 output_b64 = result['candidates'][0]['content']['parts'][0]['inlineData']['data']
-                                raw_ai_4k_image = Image.open(io.BytesIO(base64.b64decode(output_b64)))
+                                image_data = base64.b64decode(output_b64)
+                                raw_ai_4k_image = Image.open(io.BytesIO(image_data))
                                 
                                 img_filename = save_render_result(raw_ai_4k_image, last['prompt'], last['ar_val'], "4K", "全局渲染", HISTORY_DIR)
                                 
                                 st.success(f"🎆 4K 深化圆满成功！ ({raw_ai_4k_image.width}x{raw_ai_4k_image.height})")
-                                st.image(raw_ai_4k_image, caption="4K 终极渲染", use_container_width=True)
+                                # 🌟 终极修复 3：同样投喂二进制字节
+                                st.image(image_data, caption="4K 终极渲染", use_container_width=True)
                                 
                                 with open(img_filename, "rb") as file:
                                     st.download_button("⬇️ 保存 4K 极限大图", data=file, file_name=os.path.basename(img_filename), mime="image/png", type="primary", use_container_width=True)
@@ -314,7 +305,7 @@ with tab_studio:
                             st.error(f"🌐 错误 / Error: {e}")
 
 # ------------------------------------------
-# Tab 2: 历史画廊 (基本保持，整理了间距)
+# Tab 2: 历史画廊
 # ------------------------------------------
 with tab_gallery:
     st.subheader("📁 历史资产库 / History Assets")
@@ -357,7 +348,8 @@ with tab_gallery:
                     except: pass
                 
                 with cols[i % 3]:
-                    st.image(Image.open(img_path), use_container_width=True)
+                    # 🌟 终极修复 4：画廊直接给文件路径，让 Streamlit 自己去读硬盘
+                    st.image(img_path, use_container_width=True)
                     st.caption(f"**{display_stats}**")
                     
                     btn_col1, btn_col2, btn_col3 = st.columns([1, 1, 1])
@@ -373,7 +365,6 @@ with tab_gallery:
                                     try:
                                         with open(img_path, "rb") as old_img_file:
                                             history_b64 = base64.b64encode(old_img_file.read()).decode('utf-8')
-                                        # 画廊的 4K 升级也复用统一接口
                                         result = call_gemini_api(API_KEY, saved_prompt, history_b64, mask_b64=None, aspect_ratio=saved_ar, image_size="4K")
                                         if 'candidates' in result:
                                             try:
