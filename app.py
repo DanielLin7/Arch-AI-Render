@@ -179,11 +179,11 @@ CANVAS_HTML = """
 def get_native_canvas():
     """将自研的 HTML 画板编译为 Streamlit 组件，强制保存在 App 根目录防屏蔽"""
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    component_dir = os.path.join(base_dir, "native_canvas_v11") # 更改文件夹名破坏旧缓存
+    component_dir = os.path.join(base_dir, "native_canvas_v12") # 更改文件夹名破坏旧缓存
     os.makedirs(component_dir, exist_ok=True)
     with open(os.path.join(component_dir, "index.html"), "w", encoding="utf-8") as f:
         f.write(CANVAS_HTML)
-    return components.declare_component("native_canvas_v11", path=component_dir)
+    return components.declare_component("native_canvas_v12", path=component_dir)
 
 native_canvas = get_native_canvas()
 
@@ -231,30 +231,33 @@ def save_render_result(image, prompt, ar_val, q_val, mode_str, history_dir):
     return img_filename
 
 # ==========================================
-# 🔐 SaaS 门禁与密码验证系统
+# 🔐 SaaS 门禁与密码验证系统 (V12 终极防闪退重构)
 # ==========================================
 def check_password():
+    # 如果已经登录成功，直接放行
+    if st.session_state.get("password_correct"):
+        return True
+
+    st.title("🔐 欢迎 / Welcome")
+    st.info("💡 请输入授权邀请码以解锁引擎 / Please enter your invite code.")
+
     def password_entered():
         valid_passwords = ["ARCH2026", "VIP888", "DESIGN2026"] 
-        if st.session_state["password"] in valid_passwords:
+        # 安全获取密码框的值，如果匹配就验证通过
+        if st.session_state.get("pwd_input") in valid_passwords:
             st.session_state["password_correct"] = True
-            del st.session_state["password"] 
         else:
             st.session_state["password_correct"] = False
 
-    if "password_correct" not in st.session_state:
-        st.title("🔐 欢迎 / Welcome")
-        st.info("💡 请输入授权邀请码以解锁引擎 / Please enter your invite code.")
-        st.text_input("🔑 邀请码 / Invite Code:", type="password", on_change=password_entered, key="password")
-        return False
-    elif not st.session_state["password_correct"]:
-        st.title("🔐 欢迎 / Welcome")
-        st.text_input("🔑 邀请码 / Invite Code:", type="password", on_change=password_entered, key="password")
+    st.text_input("🔑 邀请码 / Invite Code:", type="password", on_change=password_entered, key="pwd_input")
+    
+    # 只要密码状态存在且为 False，说明输错了
+    if "password_correct" in st.session_state and not st.session_state["password_correct"]:
         st.error("🚫 密码错误或已过期 / Invalid or expired code.")
-        return False
-    else:
-        return True
+    
+    return False
 
+# 如果没有通过门卫，直接停止代码往下运行
 if not check_password():
     st.stop()
 
@@ -270,7 +273,7 @@ except KeyError:
     st.error("⚠️ 未检测到云端 Secrets，请确保已在 Advanced settings 中配置 GEMINI_API_KEY。")
     st.stop()
 
-st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v11.0")
+st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v12.0")
 st.markdown("---")
 
 tab_studio, tab_gallery = st.tabs(["🎨 局部重绘与工作室 / Inpainting Studio", "🖼️ 历史资产库 / Gallery"])
@@ -365,7 +368,7 @@ with tab_studio:
                             width=web_w,
                             height=web_h,
                             brush_size=stroke_width,
-                            key="inpainting_native_canvas_v11"
+                            key="inpainting_native_canvas_v12"
                         )
                     else:
                         st.success("✨ 当前为【全局渲染】模式，原图已在左侧就绪。请点击左下角开始渲染。")
