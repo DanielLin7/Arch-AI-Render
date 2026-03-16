@@ -24,8 +24,10 @@ def b64_image_to_url(*args, **kwargs):
     b64_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
     return f"data:image/png;base64,{b64_str}"
 
-# ⚡ 重点：直接给插件做开颅手术，替换它内部死记硬背的函数引用！
-streamlit_drawable_canvas.image_to_url = b64_image_to_url
+# ⚡ 史诗级修复：精准定位画板插件内部的别名 (st_image) 并替换！
+if hasattr(streamlit_drawable_canvas, "st_image"):
+    streamlit_drawable_canvas.st_image.image_to_url = b64_image_to_url
+    
 from streamlit_drawable_canvas import st_canvas 
 # ==========================================
 
@@ -115,7 +117,7 @@ except KeyError:
     st.error("⚠️ 未检测到云端 Secrets，请确保已在 Advanced settings 中配置 GEMINI_API_KEY。")
     st.stop()
 
-st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v7.1")
+st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v7.2")
 st.markdown("---")
 
 tab_studio, tab_gallery = st.tabs(["🎨 局部重绘与工作室 / Inpainting Studio", "🖼️ 历史资产库 / Gallery"])
