@@ -109,7 +109,7 @@ CANVAS_HTML = """
             const pos = getPos(e);
             ctx.beginPath();
             ctx.moveTo(pos.x, pos.y);
-            ctx.fillStyle = 'rgba(255, 0, 0, 0.6)';
+            ctx.fillStyle = 'rgba(255, 0, 0, 0.3)'; // 🌟 修复：改为更轻柔的半透明红色
             ctx.arc(pos.x, pos.y, brushSize / 2, 0, Math.PI * 2);
             ctx.fill();
             ctx.beginPath();
@@ -121,7 +121,7 @@ CANVAS_HTML = """
             e.preventDefault();
             const pos = getPos(e);
             ctx.lineTo(pos.x, pos.y);
-            ctx.strokeStyle = 'rgba(255, 0, 0, 0.6)';
+            ctx.strokeStyle = 'rgba(255, 0, 0, 0.3)'; // 🌟 修复：改为更轻柔的半透明红色
             ctx.lineWidth = brushSize;
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
@@ -198,6 +198,7 @@ def pil_to_base64(pil_img, format="JPEG", quality=85):
     return base64.b64encode(buffered.getvalue()).decode('utf-8')
 
 def call_gemini_api(api_key, prompt, base_b64, mask_b64=None, aspect_ratio="1:1", image_size="1K"):
+    # 🌟 恢复：切回效果最惊艳的 3.1 最新版大模型
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent?key={api_key}"
     headers = {'Content-Type': 'application/json'}
     
