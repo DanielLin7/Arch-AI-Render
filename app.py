@@ -218,8 +218,12 @@ def call_gemini_api(api_key, prompt, base_b64, mask_b64=None, aspect_ratio="1:1"
     payload = {
         "contents": [{"parts": parts}],
         "generationConfig": {
-            # 🌟 绝对关键：强制要求模型输出图片，否则会默默变成纯文本聊天导致静默崩溃！
-            "responseModalities": ["IMAGE"]
+            # 🌟 修复 1：找回之前版本被误删的 imageConfig 参数，保证 API 端的高清识别！
+            "responseModalities": ["IMAGE"],
+            "imageConfig": {
+                "aspectRatio": aspect_ratio,
+                "imageSize": image_size
+            }
         }
     }
     
@@ -281,7 +285,7 @@ except KeyError:
     st.error("⚠️ 未检测到云端 Secrets，请确保已在 Advanced settings 中配置 GEMINI_API_KEY。")
     st.stop()
 
-st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v12.5")
+st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v12.6")
 st.markdown("---")
 
 tab_studio, tab_gallery = st.tabs(["🎨 局部重绘与工作室 / Inpainting Studio", "🖼️ 历史资产库 / Gallery"])
@@ -398,7 +402,7 @@ with tab_studio:
                 with viewport_placeholder.container():
                     with st.spinner("💳 算力引擎运转中，大约需要 15-40 秒... / Generating..."):
                         try:
-                            # 🌟 修复 1：尊重用户的画质选项，不再强制重置为 2K，解决画廊精度显示错位问题
+                            # 🌟 尊重用户的画质选项，不再强制重置为 2K，解决画廊精度显示错位问题
                             q_val = quality.split(" ")[0]
                             if is_inpainting:
                                 ar_val = "自动"
@@ -471,7 +475,6 @@ with tab_studio:
         # ==========================================
         # 💎 4K 极限深化直通车
         # ==========================================
-        # 🌟 修复 2：将 2K 也加入允许深化 4K 的白名单中，防止局部出图后按钮消失
         if 'last_render' in st.session_state and st.session_state['last_render']['quality'] in ["512", "1K", "2K"]:
             st.divider()
             st.info("💡 满意当前光影？点击下方按钮直升 4K / Upscale to 4K instants.")
@@ -481,7 +484,7 @@ with tab_studio:
                     with st.spinner("💳 4K 深化算力运转中，请耐心等待 1-2 分钟..."):
                         try:
                             last = st.session_state['last_render']
-                            # 🌟 修复 3 (主区)：引入“无损深化咒语”，禁止 AI 发散想象改变原图结构
+                            # 引入“无损深化咒语”，禁止 AI 发散想象改变原图结构
                             upscale_prompt = f"Absolutely maintain the exact same composition, structure, and content of the base image. Do not change the design. Only enhance the resolution, add photorealistic details, and upscale to 4K high quality architectural rendering. Theme: {last['prompt']}"
                             
                             result = call_gemini_api(API_KEY, upscale_prompt, last['output_b64'], mask_b64=None, aspect_ratio=last['ar_val'], image_size="4K")
@@ -500,6 +503,12 @@ with tab_studio:
                                 
                                 image_data = base64.b64decode(output_b64)
                                 raw_ai_4k_image = Image.open(io.BytesIO(image_data))
+                                
+                                # 🌟 修复 2：物理级 4K 双保险！如果云端接口硬锁定了分辨率上限，我们在本地强制物理放大
+                                if raw_ai_4k_image.width < 3000:
+                                    target_w = 3840
+                                    target_h = int(3840 * (raw_ai_4k_image.height / raw_ai_4k_image.width))
+                                    raw_ai_4k_image = raw_ai_4k_image.resize((target_w, target_h), Image.Resampling.LANCZOS)
                                 
                                 img_filename = save_render_result(raw_ai_4k_image, last['prompt'], last['ar_val'], "4K", "全局渲染", HISTORY_DIR)
                                 
@@ -576,7 +585,7 @@ with tab_gallery:
                                         with open(img_path, "rb") as old_img_file:
                                             history_b64 = base64.b64encode(old_img_file.read()).decode('utf-8')
                                         
-                                        # 🌟 修复 3 (画廊区)：引入“无损深化咒语”，禁止 AI 发散想象改变原图结构
+                                        # 引入“无损深化咒语”，禁止 AI 发散想象改变原图结构
                                         upscale_prompt = f"Absolutely maintain the exact same composition, structure, and content of the base image. Do not change the design. Only enhance the resolution, add photorealistic details, and upscale to 4K high quality architectural rendering. Theme: {saved_prompt}"
                                         
                                         result = call_gemini_api(API_KEY, upscale_prompt, history_b64, mask_b64=None, aspect_ratio=saved_ar, image_size="4K")
@@ -593,6 +602,13 @@ with tab_gallery:
                                                 if output_b64:
                                                     new_img_data = base64.b64decode(output_b64)
                                                     new_image = Image.open(io.BytesIO(new_img_data))
+                                                    
+                                                    # 🌟 修复 2：画廊同步物理级 4K 双保险！
+                                                    if new_image.width < 3000:
+                                                        target_w = 3840
+                                                        target_h = int(3840 * (new_image.height / new_image.width))
+                                                        new_image = new_image.resize((target_w, target_h), Image.Resampling.LANCZOS)
+                                                        
                                                     save_render_result(new_image, saved_prompt, saved_ar, "4K", "画廊4K深化", HISTORY_DIR)
                                                     st.success("✅ 刷新查看 / Refresh")
                                                 else:
