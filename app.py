@@ -8,29 +8,56 @@ import datetime
 import numpy as np
 
 # ==========================================
-# 🌟 终极破壁黑魔法：精准切除画板插件的 URL 生成器
-# 彻底解决 Streamlit Cloud Iframe 跨域导致底图白板的世纪难题
+# 🌟 终极史诗黑魔法：全局系统级劫持 Streamlit 图片渲染引擎
+# 彻底碾碎 Iframe 跨域白板与图片崩溃的一切可能！
 # ==========================================
-import streamlit_drawable_canvas
+import streamlit.elements.image as st_image
 
-def custom_canvas_image_to_url(*args, **kwargs):
-    """专门为画板定制的 Base64 注射器，只接管画板，绝对不影响其他 st.image"""
-    img = args[0] if args else kwargs.get("image")
+original_image_to_url = st_image.image_to_url
+
+def robust_image_to_url(*args, **kwargs):
+    """全能型 Base64 注射器，接管整个网站的图片渲染，强制化为合法文本流"""
+    img = kwargs.get("image", args[0] if args else None)
+    
     if img is None:
-        return ""
+        return original_image_to_url(*args, **kwargs)
     
     try:
-        buffered = io.BytesIO()
-        # 强制用 PNG 格式保留完整通道并转为 Base64
-        img.save(buffered, format="PNG")
-        b64_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-        return f"data:image/png;base64,{b64_str}"
+        # 1. 如果是字符串(URL或路径)，直接放行给原生系统
+        if isinstance(img, str):
+            return original_image_to_url(*args, **kwargs)
+        
+        # 2. 如果是二进制字节流(如上传的预览图或 AI 返回的字节图)，强转 Base64
+        if isinstance(img, (bytes, bytearray)):
+            b64_str = base64.b64encode(img).decode("utf-8")
+            return f"data:image/png;base64,{b64_str}"
+        
+        # 3. 如果是实体图片对象 (最关键！专治画板的底图白板)，强转 Base64
+        if hasattr(img, "save"):
+            buffered = io.BytesIO()
+            # 确保转为 RGB/RGBA 防止个别格式报错
+            if img.mode not in ("RGB", "RGBA"):
+                img = img.convert("RGBA")
+            img.save(buffered, format="PNG")
+            b64_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+            return f"data:image/png;base64,{b64_str}"
+            
+        # 4. 如果是 Numpy 矩阵数组，转实体图后再转 Base64
+        if isinstance(img, np.ndarray):
+            pil_img = Image.fromarray(img.astype('uint8'))
+            buffered = io.BytesIO()
+            pil_img.save(buffered, format="PNG")
+            b64_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+            return f"data:image/png;base64,{b64_str}"
+            
     except Exception:
-        return ""
-
-# ⚡ 史诗级修复：没有任何条件判断，直接暴力替换插件内部导入的函数！
-streamlit_drawable_canvas.image_to_url = custom_canvas_image_to_url
+        pass
     
+    # 任何黑魔法解析失败的情况，都有原生系统保底
+    return original_image_to_url(*args, **kwargs)
+
+# 🗡️ 致命一击：强制覆盖 Streamlit 底层原生引擎！
+st_image.image_to_url = robust_image_to_url
 from streamlit_drawable_canvas import st_canvas 
 # ==========================================
 
@@ -120,7 +147,7 @@ except KeyError:
     st.error("⚠️ 未检测到云端 Secrets，请确保已在 Advanced settings 中配置 GEMINI_API_KEY。")
     st.stop()
 
-st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v7.4")
+st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v7.5")
 st.markdown("---")
 
 tab_studio, tab_gallery = st.tabs(["🎨 局部重绘与工作室 / Inpainting Studio", "🖼️ 历史资产库 / Gallery"])
