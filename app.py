@@ -580,10 +580,12 @@ with tab_gallery:
                             st.button("✔️ Max", key=f"up_{file_name}", use_container_width=True, disabled=True)
                         else:
                             if st.button("💎 4K", key=f"up_{file_name}", use_container_width=True):
-                                with st.spinner("💳..."):
+                                with st.spinner("💳 4K 算力运转中..."):
                                     try:
-                                        with open(img_path, "rb") as old_img_file:
-                                            history_b64 = base64.b64encode(old_img_file.read()).decode('utf-8')
+                                        # 🌟 修复：画廊里的图是 PNG，直接读 bytes 会导致 MIME 不匹配报错 
+                                        # 改用 pil_to_base64 统一转为 API 要求的格式
+                                        with Image.open(img_path) as old_img:
+                                            history_b64 = pil_to_base64(old_img)
                                         
                                         # 引入“无损深化咒语”，禁止 AI 发散想象改变原图结构
                                         upscale_prompt = f"Absolutely maintain the exact same composition, structure, and content of the base image. Do not change the design. Only enhance the resolution, add photorealistic details, and upscale to 4K high quality architectural rendering. Theme: {saved_prompt}"
@@ -614,10 +616,11 @@ with tab_gallery:
                                                 else:
                                                     st.error("🚫 拦截(无图像)")
                                             except Exception as e:
-                                                st.error("🚫 提取失败")
-                                        else: st.error("❌ 失败")
+                                                st.error(f"🚫 提取失败: {e}")
+                                        else: st.error("❌ 失败 (API 未返回格式)")
                                     except Exception as e:
-                                        st.error("❌ 错误")
+                                        # 🌟 修复 3：不再只显示空洞的错误，直接打印出真实报错原因
+                                        st.error(f"❌ 错误: {e}")
 
                     with btn_col3:
                         if st.button("🗑️ Del", key=f"del_{file_name}", use_container_width=True):
