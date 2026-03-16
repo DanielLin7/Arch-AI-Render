@@ -94,7 +94,7 @@ except KeyError:
     st.error("⚠️ 未检测到云端 Secrets，请确保已在 Advanced settings 中配置 GEMINI_API_KEY。")
     st.stop()
 
-st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v6.7")
+st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v6.8")
 st.markdown("---")
 
 tab_studio, tab_gallery = st.tabs(["🎨 局部重绘与工作室 / Inpainting Studio", "🖼️ 历史资产库 / Gallery"])
@@ -189,16 +189,21 @@ with tab_studio:
                     
                     if is_inpainting:
                         st.info("🖌️ 请在下方图片上**涂抹希望修改的区域**。确保画板动作为 'freedraw'。")
-                        canvas_bg = original_base_pil.resize((web_w, web_h), Image.Resampling.LANCZOS)
                         
-                        # 🌟 核心修复 1：把背景图强制锁进保险箱，防止被 Streamlit 垃圾回收导致白板
-                        st.session_state["_canvas_bg_cache"] = canvas_bg
+                        # 🌟 终极防弹显影术：洗掉因 resize 产生的异常状态，重塑带有“身份证”的纯血 PNG
+                        raw_bg = original_base_pil.resize((web_w, web_h), Image.Resampling.LANCZOS).convert("RGBA")
+                        clean_buf = io.BytesIO()
+                        raw_bg.save(clean_buf, format="PNG")
+                        safe_canvas_bg = Image.open(clean_buf)
+                        safe_canvas_bg.load() # 强制读入底层内存，确保 Streamlit 读取时 100% 成功
+                        
+                        st.session_state["_canvas_bg_cache"] = safe_canvas_bg
                         
                         canvas_result = st_canvas(
-                            fill_color="rgba(255, 0, 0, 0.5)",    # 🌟 核心修复 2：半透明红色填充
+                            fill_color="rgba(255, 0, 0, 0.5)",
                             stroke_width=stroke_width,
-                            stroke_color="rgba(255, 0, 0, 0.5)",  # 🌟 核心修复 2：半透明红色画笔，让你看清涂抹轨迹
-                            background_image=st.session_state["_canvas_bg_cache"], # 调用保险箱里的背景图
+                            stroke_color="rgba(255, 0, 0, 0.5)",
+                            background_image=st.session_state["_canvas_bg_cache"],
                             update_streamlit=True,
                             height=web_h,
                             width=web_w,
@@ -246,7 +251,6 @@ with tab_studio:
                             if is_inpainting:
                                 mask_rgba = canvas_result.image_data
                                 mask_pil = Image.fromarray(mask_rgba.astype('uint8'), 'RGBA')
-                                # 这个黑魔法只抓取画笔的透明度，无视画笔颜色，所以我们用红笔完全没问题
                                 binary_mask = mask_pil.split()[-1].point(lambda p: 255 if p >= 1 else 0).convert("RGB")
                                 final_mask_pil = binary_mask.resize(base_pil_processed.size, Image.Resampling.NEAREST)
                                 mask_payload_64 = pil_to_base64(final_mask_pil)
