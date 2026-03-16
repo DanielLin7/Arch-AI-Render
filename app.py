@@ -7,7 +7,6 @@ from PIL import Image
 import io
 import datetime
 import numpy as np
-import tempfile
 
 # ==========================================
 # 0. 页面基础配置
@@ -16,8 +15,7 @@ st.set_page_config(page_title="Architecture AI Render PRO", layout="wide", initi
 
 # ==========================================
 # 🌟 独家黑科技：自研纯血原生 HTML5 画板引擎
-# 彻底抛弃各种开源画板插件，从底层根绝一切 Iframe 跨域白板 Bug
-# 修复：纯手写 Streamlit 通信协议，0 依赖，秒开无白板！
+# 修复核心：将组件文件生成在当前安全目录下，彻底绕过 Streamlit Cloud 的 /tmp 目录屏蔽！
 # ==========================================
 CANVAS_HTML = """
 <!DOCTYPE html>
@@ -25,67 +23,59 @@ CANVAS_HTML = """
 <head>
     <meta charset="UTF-8">
     <style>
-        body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; overflow: hidden; background-color: transparent;}
-        #container { position: relative; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); border: 1px solid #e0e0e0; background: #fff; touch-action: none; }
-        #bg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; user-select: none; }
+        body { margin: 0; padding: 0; overflow: hidden; background-color: transparent; display: flex; flex-direction: column; align-items: center; font-family: sans-serif;}
+        #toolbar { width: 100%; display: flex; justify-content: space-between; align-items: center; padding: 10px 0; background: transparent; }
+        .title { font-size: 14px; font-weight: bold; color: #31333F; }
+        #canvas-container { position: relative; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); overflow: hidden; border: 1px solid #ddd; background: white;}
+        img#bg { position: absolute; top: 0; left: 0; user-select: none; pointer-events: none; }
         canvas { position: absolute; top: 0; left: 0; cursor: crosshair; touch-action: none; }
-        .toolbar { display: flex; justify-content: space-between; align-items: center; padding-bottom: 8px; }
-        .title { font-size: 14px; font-weight: 600; color: #31333F; }
-        button { padding: 6px 12px; background: #ff4b4b; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; transition: background 0.2s; }
+        button { background: #ff4b4b; color: white; border: none; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 13px;}
         button:hover { background: #ff3333; }
         button:active { transform: scale(0.98); }
     </style>
 </head>
 <body>
-    <div class="toolbar">
-        <span class="title">🖌️ 直接在下方自由涂抹 (支持不规则形状)</span>
+    <div id="toolbar">
+        <span class="title">🖌️ 请在下方图片上自由涂抹修改区域</span>
         <button id="clearBtn">🗑️ 清除重画 (Clear)</button>
     </div>
-    <div id="container">
-        <img id="bg" src="" draggable="false" />
+    <div id="canvas-container">
+        <img id="bg" src="" />
         <canvas id="drawingCanvas"></canvas>
     </div>
 
     <script>
-        // 1. 手写 Streamlit 官方双向通信协议 (绝不依赖任何外部/失效的 js 库)
+        // Streamlit 双向通信协议
         function sendMessageToStreamlitClient(type, data) {
-            var outData = Object.assign({ isStreamlitMessage: true, type: type }, data);
+            const outData = Object.assign({ isStreamlitMessage: true, type: type }, data);
             window.parent.postMessage(outData, "*");
         }
 
         const Streamlit = {
-            setComponentReady: function() {
-                sendMessageToStreamlitClient("streamlit:componentReady", {apiVersion: 1});
-            },
-            setFrameHeight: function(height) {
-                sendMessageToStreamlitClient("streamlit:setFrameHeight", {height: height});
-            },
-            setComponentValue: function(value) {
-                sendMessageToStreamlitClient("streamlit:setComponentValue", {value: value});
-            }
+            setComponentReady: function() { sendMessageToStreamlitClient("streamlit:componentReady", {apiVersion: 1}); },
+            setFrameHeight: function(height) { sendMessageToStreamlitClient("streamlit:setFrameHeight", {height: height}); },
+            setComponentValue: function(value) { sendMessageToStreamlitClient("streamlit:setComponentValue", {value: value}); }
         };
 
         const canvas = document.getElementById('drawingCanvas');
         const ctx = canvas.getContext('2d');
         const bg = document.getElementById('bg');
-        const container = document.getElementById('container');
-        const clearBtn = document.getElementById('clearBtn');
+        const container = document.getElementById('canvas-container');
         
         let isDrawing = false;
-        let isReady = false;
         let brushSize = 30;
 
-        function sendMask() {
+        function sendDataToPython() {
             const maskCanvas = document.createElement('canvas');
             maskCanvas.width = canvas.width;
             maskCanvas.height = canvas.height;
             const mCtx = maskCanvas.getContext('2d');
-            
             const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             const maskData = mCtx.createImageData(canvas.width, canvas.height);
             
             let hasDrawing = false;
             for (let i = 0; i < imgData.data.length; i += 4) {
+                // 只要画笔的透明度大于0，就判定为有效涂抹，提取为白底黑白蒙版
                 if (imgData.data[i+3] > 0) { 
                     maskData.data[i] = 255; maskData.data[i+1] = 255; maskData.data[i+2] = 255; maskData.data[i+3] = 255;
                     hasDrawing = true;
@@ -96,7 +86,7 @@ CANVAS_HTML = """
             
             if (hasDrawing) {
                 mCtx.putImageData(maskData, 0, 0);
-                Streamlit.setComponentValue(maskCanvas.toDataURL('image/jpeg'));
+                Streamlit.setComponentValue(maskCanvas.toDataURL('image/png'));
             } else {
                 Streamlit.setComponentValue("");
             }
@@ -104,37 +94,26 @@ CANVAS_HTML = """
 
         function getPos(e) {
             const rect = canvas.getBoundingClientRect();
-            let clientX, clientY;
+            let cx, cy;
             if (e.touches && e.touches.length > 0) {
-                clientX = e.touches[0].clientX; clientY = e.touches[0].clientY;
+                cx = e.touches[0].clientX; cy = e.touches[0].clientY;
             } else {
-                clientX = e.clientX; clientY = e.clientY;
+                cx = e.clientX; cy = e.clientY;
             }
-            const scaleX = canvas.width / rect.width;
-            const scaleY = canvas.height / rect.height;
-            return {
-                x: (clientX - rect.left) * scaleX,
-                y: (clientY - rect.top) * scaleY
-            };
+            return { x: cx - rect.left, y: cy - rect.top };
         }
 
-        function startDrawing(e) {
+        function startDraw(e) {
             isDrawing = true;
             e.preventDefault();
             const pos = getPos(e);
             ctx.beginPath();
             ctx.moveTo(pos.x, pos.y);
-            ctx.fillStyle = 'rgba(255, 50, 50, 0.7)';
+            ctx.fillStyle = 'rgba(255, 0, 0, 0.6)';
             ctx.arc(pos.x, pos.y, brushSize / 2, 0, Math.PI * 2);
             ctx.fill();
             ctx.beginPath();
             ctx.moveTo(pos.x, pos.y);
-        }
-
-        function stopDrawing(e) {
-            if (!isDrawing) return;
-            isDrawing = false;
-            sendMask();
         }
 
         function draw(e) {
@@ -142,46 +121,50 @@ CANVAS_HTML = """
             e.preventDefault();
             const pos = getPos(e);
             ctx.lineTo(pos.x, pos.y);
+            ctx.strokeStyle = 'rgba(255, 0, 0, 0.6)';
+            ctx.lineWidth = brushSize;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
             ctx.stroke();
             ctx.beginPath();
             ctx.moveTo(pos.x, pos.y);
         }
 
-        canvas.addEventListener('mousedown', startDrawing);
-        window.addEventListener('mouseup', stopDrawing);
+        function endDraw(e) {
+            if (!isDrawing) return;
+            isDrawing = false;
+            sendDataToPython();
+        }
+
+        canvas.addEventListener('mousedown', startDraw);
         canvas.addEventListener('mousemove', draw);
-        
-        canvas.addEventListener('touchstart', startDrawing, {passive: false});
-        window.addEventListener('touchend', stopDrawing);
+        window.addEventListener('mouseup', endDraw);
+        canvas.addEventListener('touchstart', startDraw, {passive: false});
         canvas.addEventListener('touchmove', draw, {passive: false});
-        
-        clearBtn.addEventListener('click', () => {
+        window.addEventListener('touchend', endDraw);
+
+        document.getElementById('clearBtn').addEventListener('click', () => {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            sendMask();
+            sendDataToPython();
         });
 
         window.addEventListener("message", function(event) {
             if (event.data.type === "streamlit:render") {
-                const data = event.data.args;
-                brushSize = data.brush_size;
+                const args = event.data.args;
+                brushSize = args.brush_size;
                 
-                container.style.width = data.width + 'px';
-                container.style.height = data.height + 'px';
-                
-                if (!isReady || bg.src !== "data:image/jpeg;base64," + data.bg_base64) {
-                    canvas.width = data.width;
-                    canvas.height = data.height;
-                    bg.src = "data:image/jpeg;base64," + data.bg_base64;
-                    isReady = true;
-                    Streamlit.setComponentValue("");
+                // 仅在尺寸或背景改变时更新，防止闪烁
+                if (canvas.width !== args.width || bg.src !== "data:image/jpeg;base64," + args.bg_base64) {
+                    canvas.width = args.width;
+                    canvas.height = args.height;
+                    container.style.width = args.width + "px";
+                    container.style.height = args.height + "px";
+                    bg.src = "data:image/jpeg;base64," + args.bg_base64;
+                    bg.width = args.width;
+                    bg.height = args.height;
+                    
+                    Streamlit.setFrameHeight(args.height + 60);
                 }
-                
-                ctx.strokeStyle = 'rgba(255, 50, 50, 0.7)';
-                ctx.lineCap = 'round';
-                ctx.lineJoin = 'round';
-                ctx.lineWidth = brushSize;
-                
-                Streamlit.setFrameHeight(data.height + 60);
             }
         });
 
@@ -194,12 +177,13 @@ CANVAS_HTML = """
 
 @st.cache_resource
 def get_native_canvas():
-    """将自研的 HTML 画板编译为 Streamlit 组件"""
-    component_dir = os.path.join(tempfile.gettempdir(), "native_canvas_comp")
+    """将自研的 HTML 画板编译为 Streamlit 组件，强制保存在 App 根目录防屏蔽"""
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    component_dir = os.path.join(base_dir, "native_canvas_v11") # 更改文件夹名破坏旧缓存
     os.makedirs(component_dir, exist_ok=True)
     with open(os.path.join(component_dir, "index.html"), "w", encoding="utf-8") as f:
         f.write(CANVAS_HTML)
-    return components.declare_component("native_canvas", path=component_dir)
+    return components.declare_component("native_canvas_v11", path=component_dir)
 
 native_canvas = get_native_canvas()
 
@@ -286,7 +270,7 @@ except KeyError:
     st.error("⚠️ 未检测到云端 Secrets，请确保已在 Advanced settings 中配置 GEMINI_API_KEY。")
     st.stop()
 
-st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v10.1")
+st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v11.0")
 st.markdown("---")
 
 tab_studio, tab_gallery = st.tabs(["🎨 局部重绘与工作室 / Inpainting Studio", "🖼️ 历史资产库 / Gallery"])
@@ -381,7 +365,7 @@ with tab_studio:
                             width=web_w,
                             height=web_h,
                             brush_size=stroke_width,
-                            key="inpainting_native_canvas"
+                            key="inpainting_native_canvas_v11"
                         )
                     else:
                         st.success("✨ 当前为【全局渲染】模式，原图已在左侧就绪。请点击左下角开始渲染。")
