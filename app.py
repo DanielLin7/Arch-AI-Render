@@ -7,6 +7,7 @@ from PIL import Image
 import io
 import datetime
 import numpy as np
+import time
 
 # ==========================================
 # 0. 页面基础配置
@@ -227,9 +228,17 @@ def call_gemini_api(api_key, prompt, base_b64, mask_b64=None, aspect_ratio="1:1"
         }
     }
     
-    response = requests.post(url, headers=headers, json=payload, timeout=180)
-    response.raise_for_status() 
-    return response.json()
+    # 🌟 修复 2：加入抗 503 防护罩，防止 Payload 过大导致的网关暂时性拒绝
+    for attempt in range(3):
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=180)
+            response.raise_for_status() 
+            return response.json()
+        except requests.exceptions.HTTPError as e:
+            if e.response is not None and e.response.status_code in [500, 502, 503, 429] and attempt < 2:
+                time.sleep(2) # 遇到 503 拥挤，休眠 2 秒后自动重试
+                continue
+            raise e
 
 def save_render_result(image, prompt, ar_val, q_val, mode_str, history_dir):
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -285,7 +294,7 @@ except KeyError:
     st.error("⚠️ 未检测到云端 Secrets，请确保已在 Advanced settings 中配置 GEMINI_API_KEY。")
     st.stop()
 
-st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v12.6")
+st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v12.8")
 st.markdown("---")
 
 tab_studio, tab_gallery = st.tabs(["🎨 局部重绘与工作室 / Inpainting Studio", "🖼️ 历史资产库 / Gallery"])
@@ -392,6 +401,10 @@ with tab_studio:
         # 🟢 触发主渲染逻辑
         # ==========================================
         if render_btn:
+            # 🌟 修复 3：一键渲染时清空之前的 4K 状态，防止画面闪现
+            if 'current_4k_result' in st.session_state:
+                del st.session_state['current_4k_result']
+                
             if not uploaded_file: 
                 st.warning("⚠️ 请上传底图！")
             elif not prompt: 
@@ -478,6 +491,7 @@ with tab_studio:
         if 'last_render' in st.session_state and st.session_state['last_render']['quality'] in ["512", "1K", "2K"]:
             st.divider()
             st.info("💡 满意当前光影？点击下方按钮直升 4K / Upscale to 4K instants.")
+            
             if st.button("💎 4K 极限深化 / Upscale to 4K (Ultra-HD)", type="secondary", use_container_width=True):
                 with viewport_placeholder.container():
                     st.warning("⚠️ 4K 深化适用于全局模式，会将上一张成品作为底图进行极致细节丰富。")
@@ -504,7 +518,7 @@ with tab_studio:
                                 image_data = base64.b64decode(output_b64)
                                 raw_ai_4k_image = Image.open(io.BytesIO(image_data))
                                 
-                                # 🌟 修复 2：物理级 4K 双保险！如果云端接口硬锁定了分辨率上限，我们在本地强制物理放大
+                                # 物理级 4K 双保险！如果云端接口硬锁定了分辨率上限，我们在本地强制物理放大
                                 if raw_ai_4k_image.width < 3000:
                                     target_w = 3840
                                     target_h = int(3840 * (raw_ai_4k_image.height / raw_ai_4k_image.width))
@@ -512,17 +526,30 @@ with tab_studio:
                                 
                                 img_filename = save_render_result(raw_ai_4k_image, last['prompt'], last['ar_val'], "4K", "全局渲染", HISTORY_DIR)
                                 
-                                st.success(f"🎆 4K 深化圆满成功！ ({raw_ai_4k_image.width}x{raw_ai_4k_image.height})")
-                                st.image(raw_ai_4k_image, caption="4K 终极渲染", use_column_width=True)
+                                # 🌟 修复 4：将生成结果永久锁入全局记忆，防止鼠标滑动导致图像一闪而过！
+                                st.session_state['current_4k_result'] = {
+                                    'width': raw_ai_4k_image.width,
+                                    'height': raw_ai_4k_image.height,
+                                    'filename': os.path.basename(img_filename),
+                                    'filepath': img_filename
+                                }
                                 
-                                with open(img_filename, "rb") as file:
-                                    st.download_button("⬇️ 保存 4K 极限大图", data=file, file_name=os.path.basename(img_filename), mime="image/png", type="primary", use_container_width=True)
-                            
                             except KeyError:
                                 st.error("🚫 4K 深化被拦截 (提示：指令中勿含人物)")
                         
                         except Exception as e:
                             st.error(f"🌐 错误 / Error: {e}")
+            
+            # 🌟 画外展示：只有存进了全局记忆，才能保证你在点击下载时，4K图像绝对不会消失！
+            if 'current_4k_result' in st.session_state:
+                res = st.session_state['current_4k_result']
+                st.success(f"🎆 4K 深化圆满成功！ ({res['width']}x{res['height']})")
+                
+                with open(res['filepath'], "rb") as f:
+                    final_4k_bytes = f.read()
+                    
+                st.image(final_4k_bytes, caption="4K 终极渲染", use_column_width=True)
+                st.download_button("⬇️ 保存 4K 极限大图", data=final_4k_bytes, file_name=res['filename'], mime="image/png", type="primary", use_container_width=True, key="dl_main_4k")
 
 # ------------------------------------------
 # Tab 2: 历史画廊
@@ -582,10 +609,14 @@ with tab_gallery:
                             if st.button("💎 4K", key=f"up_{file_name}", use_container_width=True):
                                 with st.spinner("💳 4K 算力运转中..."):
                                     try:
-                                        # 🌟 修复：画廊里的图是 PNG，直接读 bytes 会导致 MIME 不匹配报错 
-                                        # 改用 pil_to_base64 统一转为 API 要求的格式
+                                        # 🌟 修复 5：画廊图片压缩安检！防止历史 2K 超大图撑爆大模型网关导致 503 拒载
                                         with Image.open(img_path) as old_img:
-                                            history_b64 = pil_to_base64(old_img)
+                                            safe_img = old_img.copy()
+                                            if safe_img.mode != "RGB":
+                                                safe_img = safe_img.convert("RGB")
+                                            if safe_img.width > 2048 or safe_img.height > 2048:
+                                                safe_img.thumbnail((2048, 2048), Image.Resampling.LANCZOS)
+                                            history_b64 = pil_to_base64(safe_img)
                                         
                                         # 引入“无损深化咒语”，禁止 AI 发散想象改变原图结构
                                         upscale_prompt = f"Absolutely maintain the exact same composition, structure, and content of the base image. Do not change the design. Only enhance the resolution, add photorealistic details, and upscale to 4K high quality architectural rendering. Theme: {saved_prompt}"
@@ -605,7 +636,7 @@ with tab_gallery:
                                                     new_img_data = base64.b64decode(output_b64)
                                                     new_image = Image.open(io.BytesIO(new_img_data))
                                                     
-                                                    # 🌟 修复 2：画廊同步物理级 4K 双保险！
+                                                    # 画廊同步物理级 4K 双保险！
                                                     if new_image.width < 3000:
                                                         target_w = 3840
                                                         target_h = int(3840 * (new_image.height / new_image.width))
@@ -619,7 +650,6 @@ with tab_gallery:
                                                 st.error(f"🚫 提取失败: {e}")
                                         else: st.error("❌ 失败 (API 未返回格式)")
                                     except Exception as e:
-                                        # 🌟 修复 3：不再只显示空洞的错误，直接打印出真实报错原因
                                         st.error(f"❌ 错误: {e}")
 
                     with btn_col3:
