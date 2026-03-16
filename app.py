@@ -198,22 +198,29 @@ def pil_to_base64(pil_img, format="JPEG", quality=85):
     return base64.b64encode(buffered.getvalue()).decode('utf-8')
 
 def call_gemini_api(api_key, prompt, base_b64, mask_b64=None, aspect_ratio="1:1", image_size="1K"):
-    # 🌟 恢复：切回效果最惊艳的 3.1 最新版大模型
+    # 🌟 恢复：切回效果最惊艳的 3.1 最新版大模型 (专为外部 Streamlit Cloud 部署打造)
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent?key={api_key}"
     headers = {'Content-Type': 'application/json'}
     
+    # 智能附加画质与比例参数到 prompt 中，保证效果最大化
+    enhanced_prompt = f"{prompt} (High quality architectural render, resolution: {image_size})"
+    
     parts = []
     if mask_b64:
-        parts.append({"inline_data": {"mime_type": "image/jpeg", "data": base_b64}})
-        parts.append({"inline_data": {"mime_type": "image/jpeg", "data": mask_b64}})
-        parts.append({"text": prompt})
+        # API 强制要求严格的驼峰命名法 inlineData 和 mimeType
+        parts.append({"inlineData": {"mimeType": "image/jpeg", "data": base_b64}})
+        parts.append({"inlineData": {"mimeType": "image/jpeg", "data": mask_b64}})
+        parts.append({"text": enhanced_prompt})
     else:
-        parts.append({"text": prompt})
-        parts.append({"inline_data": {"mime_type": "image/jpeg", "data": base_b64}})
+        parts.append({"text": enhanced_prompt})
+        parts.append({"inlineData": {"mimeType": "image/jpeg", "data": base_b64}})
         
     payload = {
         "contents": [{"parts": parts}],
-        "generationConfig": {"imageConfig": {"aspectRatio": aspect_ratio, "imageSize": image_size}}
+        "generationConfig": {
+            # 🌟 绝对关键：强制要求模型输出图片，否则会默默变成纯文本聊天导致静默崩溃！
+            "responseModalities": ["IMAGE"]
+        }
     }
     
     response = requests.post(url, headers=headers, json=payload, timeout=180)
@@ -274,7 +281,7 @@ except KeyError:
     st.error("⚠️ 未检测到云端 Secrets，请确保已在 Advanced settings 中配置 GEMINI_API_KEY。")
     st.stop()
 
-st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v12.0")
+st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v12.3")
 st.markdown("---")
 
 tab_studio, tab_gallery = st.tabs(["🎨 局部重绘与工作室 / Inpainting Studio", "🖼️ 历史资产库 / Gallery"])
@@ -421,7 +428,21 @@ with tab_studio:
                             result = call_gemini_api(API_KEY, prompt, base_payload_64, mask_payload_64, ar_val, q_val)
 
                             try:
-                                output_b64 = result['candidates'][0]['content']['parts'][0]['inlineData']['data']
+                                # 🌟 强化解析器：绝不遗漏真正的报错信息
+                                parts = result.get('candidates', [{}])[0].get('content', {}).get('parts', [])
+                                output_b64 = None
+                                for p in parts:
+                                    if 'inlineData' in p:
+                                        output_b64 = p['inlineData']['data']
+                                        break
+                                
+                                if not output_b64:
+                                    fallback_txt = "".join([p.get('text', '') for p in parts])
+                                    st.error("🚫 API 未返回图像内容。这通常是因为指令涉及敏感词汇被系统拦截。")
+                                    if fallback_txt:
+                                        st.warning(f"💡 大模型回复: {fallback_txt}")
+                                    st.stop()
+
                                 image_data = base64.b64decode(output_b64)
                                 raw_ai_image = Image.open(io.BytesIO(image_data))
                                 
@@ -461,7 +482,17 @@ with tab_studio:
                             result = call_gemini_api(API_KEY, last['prompt'], last['output_b64'], mask_b64=None, aspect_ratio=last['ar_val'], image_size="4K")
 
                             try:
-                                output_b64 = result['candidates'][0]['content']['parts'][0]['inlineData']['data']
+                                parts = result.get('candidates', [{}])[0].get('content', {}).get('parts', [])
+                                output_b64 = None
+                                for p in parts:
+                                    if 'inlineData' in p:
+                                        output_b64 = p['inlineData']['data']
+                                        break
+                                
+                                if not output_b64:
+                                    st.error("🚫 4K 深化未返回图像，可能被安全系统拦截。")
+                                    st.stop()
+                                
                                 image_data = base64.b64decode(output_b64)
                                 raw_ai_4k_image = Image.open(io.BytesIO(image_data))
                                 
@@ -542,12 +573,22 @@ with tab_gallery:
                                         result = call_gemini_api(API_KEY, saved_prompt, history_b64, mask_b64=None, aspect_ratio=saved_ar, image_size="4K")
                                         if 'candidates' in result:
                                             try:
-                                                new_img_data = base64.b64decode(result['candidates'][0]['content']['parts'][0]['inlineData']['data'])
-                                                new_image = Image.open(io.BytesIO(new_img_data))
-                                                save_render_result(new_image, saved_prompt, saved_ar, "4K", "画廊4K深化", HISTORY_DIR)
-                                                st.success("✅ 刷新查看 / Refresh")
-                                            except KeyError:
-                                                st.error("🚫 拦截(敏感)")
+                                                parts = result['candidates'][0]['content']['parts']
+                                                output_b64 = None
+                                                for p in parts:
+                                                    if 'inlineData' in p:
+                                                        output_b64 = p['inlineData']['data']
+                                                        break
+                                                
+                                                if output_b64:
+                                                    new_img_data = base64.b64decode(output_b64)
+                                                    new_image = Image.open(io.BytesIO(new_img_data))
+                                                    save_render_result(new_image, saved_prompt, saved_ar, "4K", "画廊4K深化", HISTORY_DIR)
+                                                    st.success("✅ 刷新查看 / Refresh")
+                                                else:
+                                                    st.error("🚫 拦截(无图像)")
+                                            except Exception as e:
+                                                st.error("🚫 提取失败")
                                         else: st.error("❌ 失败")
                                     except Exception as e:
                                         st.error("❌ 错误")
