@@ -17,13 +17,13 @@ st.set_page_config(page_title="Architecture AI Render PRO", layout="wide", initi
 # ==========================================
 # 🌟 独家黑科技：自研纯血原生 HTML5 画板引擎
 # 彻底抛弃各种开源画板插件，从底层根绝一切 Iframe 跨域白板 Bug
+# 修复：纯手写 Streamlit 通信协议，0 依赖，秒开无白板！
 # ==========================================
 CANVAS_HTML = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/streamlit-component-lib/1.3.0/streamlit.js"></script>
     <style>
         body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; overflow: hidden; background-color: transparent;}
         #container { position: relative; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); border: 1px solid #e0e0e0; background: #fff; touch-action: none; }
@@ -47,6 +47,24 @@ CANVAS_HTML = """
     </div>
 
     <script>
+        // 1. 手写 Streamlit 官方双向通信协议 (绝不依赖任何外部/失效的 js 库)
+        function sendMessageToStreamlitClient(type, data) {
+            var outData = Object.assign({ isStreamlitMessage: true, type: type }, data);
+            window.parent.postMessage(outData, "*");
+        }
+
+        const Streamlit = {
+            setComponentReady: function() {
+                sendMessageToStreamlitClient("streamlit:componentReady", {apiVersion: 1});
+            },
+            setFrameHeight: function(height) {
+                sendMessageToStreamlitClient("streamlit:setFrameHeight", {height: height});
+            },
+            setComponentValue: function(value) {
+                sendMessageToStreamlitClient("streamlit:setComponentValue", {value: value});
+            }
+        };
+
         const canvas = document.getElementById('drawingCanvas');
         const ctx = canvas.getContext('2d');
         const bg = document.getElementById('bg');
@@ -55,6 +73,7 @@ CANVAS_HTML = """
         
         let isDrawing = false;
         let isReady = false;
+        let brushSize = 30;
 
         function sendMask() {
             const maskCanvas = document.createElement('canvas');
@@ -83,40 +102,49 @@ CANVAS_HTML = """
             }
         }
 
-        function startDrawing(e) {
-            isDrawing = true;
-            draw(e);
+        function getPos(e) {
+            const rect = canvas.getBoundingClientRect();
+            let clientX, clientY;
+            if (e.touches && e.touches.length > 0) {
+                clientX = e.touches[0].clientX; clientY = e.touches[0].clientY;
+            } else {
+                clientX = e.clientX; clientY = e.clientY;
+            }
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            return {
+                x: (clientX - rect.left) * scaleX,
+                y: (clientY - rect.top) * scaleY
+            };
         }
 
-        function stopDrawing() {
+        function startDrawing(e) {
+            isDrawing = true;
+            e.preventDefault();
+            const pos = getPos(e);
+            ctx.beginPath();
+            ctx.moveTo(pos.x, pos.y);
+            ctx.fillStyle = 'rgba(255, 50, 50, 0.7)';
+            ctx.arc(pos.x, pos.y, brushSize / 2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(pos.x, pos.y);
+        }
+
+        function stopDrawing(e) {
             if (!isDrawing) return;
             isDrawing = false;
-            ctx.beginPath();
             sendMask();
         }
 
         function draw(e) {
             if (!isDrawing) return;
             e.preventDefault();
-            
-            const rect = canvas.getBoundingClientRect();
-            let clientX, clientY;
-            
-            if (e.touches && e.touches.length > 0) {
-                clientX = e.touches[0].clientX; clientY = e.touches[0].clientY;
-            } else {
-                clientX = e.clientX; clientY = e.clientY;
-            }
-            
-            const scaleX = canvas.width / rect.width;
-            const scaleY = canvas.height / rect.height;
-            const x = (clientX - rect.left) * scaleX;
-            const y = (clientY - rect.top) * scaleY;
-
-            ctx.lineTo(x, y);
+            const pos = getPos(e);
+            ctx.lineTo(pos.x, pos.y);
             ctx.stroke();
             ctx.beginPath();
-            ctx.moveTo(x, y);
+            ctx.moveTo(pos.x, pos.y);
         }
 
         canvas.addEventListener('mousedown', startDrawing);
@@ -132,29 +160,33 @@ CANVAS_HTML = """
             sendMask();
         });
 
-        function onRender(event) {
-            const data = event.detail.args;
-            container.style.width = data.width + 'px';
-            container.style.height = data.height + 'px';
-            
-            if (!isReady || bg.src !== "data:image/jpeg;base64," + data.bg_base64) {
-                canvas.width = data.width;
-                canvas.height = data.height;
-                bg.src = "data:image/jpeg;base64," + data.bg_base64;
-                isReady = true;
-                Streamlit.setComponentValue("");
+        window.addEventListener("message", function(event) {
+            if (event.data.type === "streamlit:render") {
+                const data = event.data.args;
+                brushSize = data.brush_size;
+                
+                container.style.width = data.width + 'px';
+                container.style.height = data.height + 'px';
+                
+                if (!isReady || bg.src !== "data:image/jpeg;base64," + data.bg_base64) {
+                    canvas.width = data.width;
+                    canvas.height = data.height;
+                    bg.src = "data:image/jpeg;base64," + data.bg_base64;
+                    isReady = true;
+                    Streamlit.setComponentValue("");
+                }
+                
+                ctx.strokeStyle = 'rgba(255, 50, 50, 0.7)';
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                ctx.lineWidth = brushSize;
+                
+                Streamlit.setFrameHeight(data.height + 60);
             }
-            
-            ctx.strokeStyle = 'rgba(255, 50, 50, 0.7)';
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-            ctx.lineWidth = data.brush_size;
-            
-            Streamlit.setFrameHeight(data.height + 45);
-        }
+        });
 
-        Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, onRender);
         Streamlit.setComponentReady();
+        Streamlit.setFrameHeight(100);
     </script>
 </body>
 </html>
@@ -254,7 +286,7 @@ except KeyError:
     st.error("⚠️ 未检测到云端 Secrets，请确保已在 Advanced settings 中配置 GEMINI_API_KEY。")
     st.stop()
 
-st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v10.0")
+st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v10.1")
 st.markdown("---")
 
 tab_studio, tab_gallery = st.tabs(["🎨 局部重绘与工作室 / Inpainting Studio", "🖼️ 历史资产库 / Gallery"])
