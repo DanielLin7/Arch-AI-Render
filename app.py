@@ -6,9 +6,28 @@ from PIL import Image
 import io
 import datetime
 import numpy as np
+
+# ==========================================
+# 🌟 终极破壁黑魔法：全局劫持画板底层的 URL 生成器
+# 彻底解决 Streamlit Cloud Iframe 跨域导致底图白板的世纪难题
+# ==========================================
+import streamlit_drawable_canvas
+
+def b64_image_to_url(*args, **kwargs):
+    """强制将图片转换为 Base64 实体数据，完全绕过 Streamlit 的网络请求与跨域拦截"""
+    img = args[0] if args else kwargs.get("image")
+    if img is None:
+        return ""
+    buffered = io.BytesIO()
+    # 强制用 PNG 格式保留完整通道
+    img.save(buffered, format="PNG")
+    b64_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+    return f"data:image/png;base64,{b64_str}"
+
+# ⚡ 重点：直接给插件做开颅手术，替换它内部死记硬背的函数引用！
+streamlit_drawable_canvas.image_to_url = b64_image_to_url
 from streamlit_drawable_canvas import st_canvas 
-# 🌟 引入 Streamlit 底层图片引擎，准备进行拦截
-import streamlit.elements.image as st_image
+# ==========================================
 
 # ==========================================
 # 0. 页面基础配置
@@ -96,7 +115,7 @@ except KeyError:
     st.error("⚠️ 未检测到云端 Secrets，请确保已在 Advanced settings 中配置 GEMINI_API_KEY。")
     st.stop()
 
-st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v7.0")
+st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v7.1")
 st.markdown("---")
 
 tab_studio, tab_gallery = st.tabs(["🎨 局部重绘与工作室 / Inpainting Studio", "🖼️ 历史资产库 / Gallery"])
@@ -192,25 +211,8 @@ with tab_studio:
                     if is_inpainting:
                         st.info("🖌️ 请在下方图片上**涂抹希望修改的区域**。确保画板动作为 'freedraw'。")
                         
-                        raw_bg = original_base_pil.resize((web_w, web_h), Image.Resampling.LANCZOS).convert("RGB")
+                        raw_bg = original_base_pil.resize((web_w, web_h), Image.Resampling.LANCZOS).convert("RGBA")
                         
-                        # ==========================================
-                        # 🌟 终极破壁黑魔法：劫持 Streamlit 底层 URL 生成器
-                        # 强制把图片转化为 Base64 实体数据注入画板，彻底粉碎跨域拦截！
-                        # ==========================================
-                        original_img_to_url = getattr(st_image, "image_to_url", None)
-                        
-                        if original_img_to_url:
-                            def base64_image_to_url(image, width=-1, clamp=False, channels="RGB", output_format="auto", image_id=""):
-                                buf = io.BytesIO()
-                                image.save(buf, format="JPEG", quality=90)
-                                b64_str = base64.b64encode(buf.getvalue()).decode('utf-8')
-                                return f"data:image/jpeg;base64,{b64_str}"
-                            
-                            # 挂载劫持函数
-                            st_image.image_to_url = base64_image_to_url
-                        
-                        # 呼叫画板
                         canvas_result = st_canvas(
                             fill_color="rgba(255, 0, 0, 0.5)",
                             stroke_width=stroke_width,
@@ -222,12 +224,6 @@ with tab_studio:
                             drawing_mode=drawing_mode_safe,
                             key="inpainting_canvas",
                         )
-                        
-                        # 画板加载完成后，立刻将系统还原，做到“杀人无形”
-                        if original_img_to_url:
-                            st_image.image_to_url = original_img_to_url
-                        # ==========================================
-
                     else:
                         st.success("✨ 当前为【全局渲染】模式，原图已在左侧就绪。请点击左下角开始渲染。")
                         canvas_result = None
