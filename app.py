@@ -12,6 +12,10 @@ import numpy as np
 # ==========================================
 st.set_page_config(page_title="Architecture AI Render PRO", layout="wide", initial_sidebar_state="collapsed")
 
+# 🌟 初始化激光画笔的记忆系统
+if "mask_stamps" not in st.session_state:
+    st.session_state.mask_stamps = []
+
 # ==========================================
 # 🛠️ 核心辅助函数
 # ==========================================
@@ -93,7 +97,7 @@ except KeyError:
     st.error("⚠️ 未检测到云端 Secrets，请确保已在 Advanced settings 中配置 GEMINI_API_KEY。")
     st.stop()
 
-st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v8.0")
+st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v9.0")
 st.markdown("---")
 
 tab_studio, tab_gallery = st.tabs(["🎨 局部重绘与工作室 / Inpainting Studio", "🖼️ 历史资产库 / Gallery"])
@@ -119,9 +123,9 @@ with tab_studio:
         if original_base_pil:
             inpainting_mode = st.radio(
                 "模式 / Mode",
-                ["🎨 局部重绘 (框选修改)", "🚀 全局渲染 (整体出图)"],
+                ["🎨 局部重绘 (激光涂抹)", "🚀 全局渲染 (整体出图)"],
                 horizontal=True,
-                help="局部重绘：修改红框区域；全局渲染：整体风格化。"
+                help="局部重绘：修改画笔涂抹区域；全局渲染：整体风格化。"
             )
         else:
             st.info("👈 上传图片后即可选择重绘模式")
@@ -140,11 +144,11 @@ with tab_studio:
         
         if selected_style == "✍️ 自定义 / Custom Prompt":
             if is_inpainting:
-                prompt = st.text_area("输入重绘指令 (建议英文) / Inpainting Prompt:", value="", help="描述框选区域生成什么，如：'A modern glass balcony'")
+                prompt = st.text_area("输入重绘指令 (建议英文) / Inpainting Prompt:", value="", help="描述你想要修改的内容，如：'A modern glass balcony'")
             else:
                 prompt = st.text_area("输入指令 (建议英文) / Global Prompt:", value="")
         elif is_inpainting:
-            st.warning("💡 预设风格将全局影响框选区域。如需精确控制，建议切换至『自定义』并详细描述（如：'Add a minimalist tree'）。")
+            st.warning("💡 预设风格将全局影响涂抹区域。如需精确控制，建议切换至『自定义』并详细描述。")
 
         st.subheader("3. 画幅与参数 / Settings")
         
@@ -163,42 +167,74 @@ with tab_studio:
         st.subheader("📺 渲染视口 / Viewport")
         viewport_placeholder = st.empty()
         
-        # 保存框选的坐标范围
-        x_range = (0.0, 100.0)
-        y_range = (0.0, 100.0)
+        # 准备获取虚拟画笔参数
+        brush_x, brush_y, brush_r, brush_shape = 50.0, 50.0, 10.0, "圆形"
         
         if original_base_pil:
             with viewport_placeholder.container():
                 if is_inpainting:
-                    st.info("🎯 请调整下方滑块，框选你需要重绘的区域。")
+                    st.success("🎯 **【原生激光画笔控制台】** \n通过滑块移动绿色准星，点击『涂抹』盖章。多次涂抹可组合成复杂形状！")
                     
-                    # 🌟 原生滑块：彻底抛弃画板，用百分比滑块定义区域
-                    col_slider1, col_slider2 = st.columns(2)
-                    with col_slider1:
-                        x_range = st.slider("↔️ 水平重绘范围 (X轴 %)", 0.0, 100.0, (30.0, 70.0), help="左侧和右侧的边界")
-                    with col_slider2:
-                        y_range = st.slider("↕️ 垂直重绘范围 (Y轴 %)", 0.0, 100.0, (30.0, 70.0), help="顶部和底部的边界")
+                    # 🌟 核心：原生虚拟画笔控制台
+                    col_shape, col_size = st.columns(2)
+                    with col_shape:
+                        brush_shape = st.radio("🖌️ 画笔形状", ["圆形", "方形"], horizontal=True)
+                    with col_size:
+                        brush_r = st.slider("📏 画笔大小 (半径 %)", 1.0, 50.0, 10.0)
+                        
+                    col_x, col_y = st.columns(2)
+                    with col_x:
+                        brush_x = st.slider("↔️ 准星水平位置 (X %)", 0.0, 100.0, 50.0)
+                    with col_y:
+                        brush_y = st.slider("↕️ 准星垂直位置 (Y %)", 0.0, 100.0, 50.0)
 
-                    # 动态绘制带红框的预览图
+                    # 画笔操作按钮
+                    btn_col1, btn_col2, btn_col3 = st.columns(3)
+                    if btn_col1.button("🔴 涂抹当前准星区", use_container_width=True):
+                        st.session_state.mask_stamps.append((brush_shape, brush_x, brush_y, brush_r))
+                    if btn_col2.button("↩️ 撤销上一笔", use_container_width=True):
+                        if st.session_state.mask_stamps:
+                            st.session_state.mask_stamps.pop()
+                    if btn_col3.button("🗑️ 清空所有涂抹", use_container_width=True):
+                        st.session_state.mask_stamps = []
+
+                    # 动态绘制预览图：原始底图 + 红色历史涂抹 + 绿色当前准星
                     preview_img = original_base_pil.copy()
                     if preview_img.mode != 'RGBA':
                         preview_img = preview_img.convert('RGBA')
                         
-                    # 创建一个透明的涂层用来画红框
                     overlay = Image.new('RGBA', preview_img.size, (0, 0, 0, 0))
                     draw = ImageDraw.Draw(overlay)
-                    
                     w, h = preview_img.size
-                    x1, x2 = w * x_range[0] / 100, w * x_range[1] / 100
-                    y1, y2 = h * y_range[0] / 100, h * y_range[1] / 100
                     
-                    # 画一个半透明的红框
-                    draw.rectangle([x1, y1, x2, y2], fill=(255, 50, 50, 120), outline=(255, 0, 0, 255), width=3)
+                    # 1. 绘制历史盖章（红色填充）
+                    for shape, sx, sy, sr in st.session_state.mask_stamps:
+                        cx, cy = w * sx / 100, h * sy / 100
+                        cr_x, cr_y = w * sr / 100, w * sr / 100 # 保持比例统一用宽度的百分比
+                        box = [cx - cr_x, cy - cr_y, cx + cr_x, cy + cr_y]
+                        if shape == "圆形":
+                            draw.ellipse(box, fill=(255, 50, 50, 180))
+                        else:
+                            draw.rectangle(box, fill=(255, 50, 50, 180))
+                            
+                    # 2. 绘制当前绿色准星（空心）
+                    hx, hy = w * brush_x / 100, h * brush_y / 100
+                    hr_x, hr_y = w * brush_r / 100, w * brush_r / 100
+                    hover_box = [hx - hr_x, hy - hr_y, hx + hr_x, hy + hr_y]
                     
-                    # 合并原图和红框涂层
+                    if brush_shape == "圆形":
+                        draw.ellipse(hover_box, outline=(0, 255, 0, 255), width=4)
+                    else:
+                        draw.rectangle(hover_box, outline=(0, 255, 0, 255), width=4)
+                        
+                    # 画个十字中心点
+                    draw.line([hx-15, hy, hx+15, hy], fill=(0, 255, 0, 255), width=3)
+                    draw.line([hx, hy-15, hx, hy+15], fill=(0, 255, 0, 255), width=3)
+                    
+                    # 合并并显示
                     final_preview = Image.alpha_composite(preview_img, overlay)
+                    st.image(final_preview, caption="🎯 绿色为准星，红色为已涂抹的重绘区域", use_column_width=True)
                     
-                    st.image(final_preview, caption="🎯 红色高亮区域即为 AI 重绘范围", use_column_width=True)
                 else:
                     st.success("✨ 当前为【全局渲染】模式，原图已在左侧就绪。请点击左下角开始渲染。")
                     st.image(original_base_pil, caption="输入底图 / Input Base", use_column_width=True)
@@ -236,20 +272,28 @@ with tab_studio:
                             mask_payload_64 = None
 
                             if is_inpainting:
-                                # 🌟 根据滑块数值，动态生成纯净的黑白蒙版！
+                                # 💡 智能补全：如果用户忘记点涂抹，就直接点生成，我们自动把当前准星当作涂抹区域
+                                stamps_to_use = st.session_state.mask_stamps.copy()
+                                if not stamps_to_use:
+                                    stamps_to_use.append((brush_shape, brush_x, brush_y, brush_r))
+                                    
+                                # 生成纯黑白蒙版给 AI
                                 w, h = base_pil_processed.size
-                                m_x1, m_x2 = w * x_range[0] / 100, w * x_range[1] / 100
-                                m_y1, m_y2 = h * y_range[0] / 100, h * y_range[1] / 100
-                                
-                                # 生成纯黑背景
                                 mask_pil = Image.new("L", (w, h), 0)
                                 mask_draw = ImageDraw.Draw(mask_pil)
-                                # 画出纯白色的重绘区域
-                                mask_draw.rectangle([m_x1, m_y1, m_x2, m_y2], fill=255)
+                                
+                                for shape, sx, sy, sr in stamps_to_use:
+                                    cx, cy = w * sx / 100, h * sy / 100
+                                    cr_x, cr_y = w * sr / 100, w * sr / 100
+                                    box = [cx - cr_x, cy - cr_y, cx + cr_x, cy + cr_y]
+                                    if shape == "圆形":
+                                        mask_draw.ellipse(box, fill=255)
+                                    else:
+                                        mask_draw.rectangle(box, fill=255)
                                 
                                 final_mask_pil = mask_pil.convert("RGB")
                                 mask_payload_64 = pil_to_base64(final_mask_pil)
-                                st.toast("🛡️ 100% 原生框选蒙版生成成功！")
+                                st.toast("🛡️ 原生多层叠加蒙版生成成功！")
 
                             result = call_gemini_api(API_KEY, prompt, base_payload_64, mask_payload_64, ar_val, q_val)
 
