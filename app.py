@@ -7,6 +7,8 @@ import io
 import datetime
 import numpy as np
 from streamlit_drawable_canvas import st_canvas 
+# 🌟 引入 Streamlit 底层图片引擎，准备进行拦截
+import streamlit.elements.image as st_image
 
 # ==========================================
 # 0. 页面基础配置
@@ -94,7 +96,7 @@ except KeyError:
     st.error("⚠️ 未检测到云端 Secrets，请确保已在 Advanced settings 中配置 GEMINI_API_KEY。")
     st.stop()
 
-st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v6.9")
+st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v7.0")
 st.markdown("---")
 
 tab_studio, tab_gallery = st.tabs(["🎨 局部重绘与工作室 / Inpainting Studio", "🖼️ 历史资产库 / Gallery"])
@@ -190,26 +192,42 @@ with tab_studio:
                     if is_inpainting:
                         st.info("🖌️ 请在下方图片上**涂抹希望修改的区域**。确保画板动作为 'freedraw'。")
                         
-                        # 🌟 终极绝杀：物理硬盘落地方案！杜绝一切内存回收导致的白板黑洞
-                        temp_bg_path = os.path.join(HISTORY_DIR, "temp_canvas_bg.png")
                         raw_bg = original_base_pil.resize((web_w, web_h), Image.Resampling.LANCZOS).convert("RGB")
-                        # 将背景图实实在在地保存在服务器硬盘上
-                        raw_bg.save(temp_bg_path, format="PNG")
                         
-                        # 直接命令画板去读取硬盘里的实体文件
-                        disk_bg_image = Image.open(temp_bg_path)
+                        # ==========================================
+                        # 🌟 终极破壁黑魔法：劫持 Streamlit 底层 URL 生成器
+                        # 强制把图片转化为 Base64 实体数据注入画板，彻底粉碎跨域拦截！
+                        # ==========================================
+                        original_img_to_url = getattr(st_image, "image_to_url", None)
                         
+                        if original_img_to_url:
+                            def base64_image_to_url(image, width=-1, clamp=False, channels="RGB", output_format="auto", image_id=""):
+                                buf = io.BytesIO()
+                                image.save(buf, format="JPEG", quality=90)
+                                b64_str = base64.b64encode(buf.getvalue()).decode('utf-8')
+                                return f"data:image/jpeg;base64,{b64_str}"
+                            
+                            # 挂载劫持函数
+                            st_image.image_to_url = base64_image_to_url
+                        
+                        # 呼叫画板
                         canvas_result = st_canvas(
                             fill_color="rgba(255, 0, 0, 0.5)",
                             stroke_width=stroke_width,
                             stroke_color="rgba(255, 0, 0, 0.5)",
-                            background_image=disk_bg_image,
+                            background_image=raw_bg,
                             update_streamlit=True,
                             height=web_h,
                             width=web_w,
                             drawing_mode=drawing_mode_safe,
                             key="inpainting_canvas",
                         )
+                        
+                        # 画板加载完成后，立刻将系统还原，做到“杀人无形”
+                        if original_img_to_url:
+                            st_image.image_to_url = original_img_to_url
+                        # ==========================================
+
                     else:
                         st.success("✨ 当前为【全局渲染】模式，原图已在左侧就绪。请点击左下角开始渲染。")
                         canvas_result = None
