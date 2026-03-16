@@ -1,26 +1,183 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import base64
 import os
 import requests
-from PIL import Image, ImageDraw
+from PIL import Image
 import io
 import datetime
 import numpy as np
+import tempfile
 
 # ==========================================
 # 0. 页面基础配置
 # ==========================================
 st.set_page_config(page_title="Architecture AI Render PRO", layout="wide", initial_sidebar_state="collapsed")
 
-# 🌟 初始化激光画笔的记忆系统
-if "mask_stamps" not in st.session_state:
-    st.session_state.mask_stamps = []
+# ==========================================
+# 🌟 独家黑科技：自研纯血原生 HTML5 画板引擎
+# 彻底抛弃各种开源画板插件，从底层根绝一切 Iframe 跨域白板 Bug
+# ==========================================
+CANVAS_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/streamlit-component-lib/1.3.0/streamlit.js"></script>
+    <style>
+        body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; overflow: hidden; background-color: transparent;}
+        #container { position: relative; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); border: 1px solid #e0e0e0; background: #fff; touch-action: none; }
+        #bg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; user-select: none; }
+        canvas { position: absolute; top: 0; left: 0; cursor: crosshair; touch-action: none; }
+        .toolbar { display: flex; justify-content: space-between; align-items: center; padding-bottom: 8px; }
+        .title { font-size: 14px; font-weight: 600; color: #31333F; }
+        button { padding: 6px 12px; background: #ff4b4b; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; transition: background 0.2s; }
+        button:hover { background: #ff3333; }
+        button:active { transform: scale(0.98); }
+    </style>
+</head>
+<body>
+    <div class="toolbar">
+        <span class="title">🖌️ 直接在下方自由涂抹 (支持不规则形状)</span>
+        <button id="clearBtn">🗑️ 清除重画 (Clear)</button>
+    </div>
+    <div id="container">
+        <img id="bg" src="" draggable="false" />
+        <canvas id="drawingCanvas"></canvas>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('drawingCanvas');
+        const ctx = canvas.getContext('2d');
+        const bg = document.getElementById('bg');
+        const container = document.getElementById('container');
+        const clearBtn = document.getElementById('clearBtn');
+        
+        let isDrawing = false;
+        let isReady = false;
+
+        function sendMask() {
+            const maskCanvas = document.createElement('canvas');
+            maskCanvas.width = canvas.width;
+            maskCanvas.height = canvas.height;
+            const mCtx = maskCanvas.getContext('2d');
+            
+            const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const maskData = mCtx.createImageData(canvas.width, canvas.height);
+            
+            let hasDrawing = false;
+            for (let i = 0; i < imgData.data.length; i += 4) {
+                if (imgData.data[i+3] > 0) { 
+                    maskData.data[i] = 255; maskData.data[i+1] = 255; maskData.data[i+2] = 255; maskData.data[i+3] = 255;
+                    hasDrawing = true;
+                } else {
+                    maskData.data[i] = 0; maskData.data[i+1] = 0; maskData.data[i+2] = 0; maskData.data[i+3] = 255;
+                }
+            }
+            
+            if (hasDrawing) {
+                mCtx.putImageData(maskData, 0, 0);
+                Streamlit.setComponentValue(maskCanvas.toDataURL('image/jpeg'));
+            } else {
+                Streamlit.setComponentValue("");
+            }
+        }
+
+        function startDrawing(e) {
+            isDrawing = true;
+            draw(e);
+        }
+
+        function stopDrawing() {
+            if (!isDrawing) return;
+            isDrawing = false;
+            ctx.beginPath();
+            sendMask();
+        }
+
+        function draw(e) {
+            if (!isDrawing) return;
+            e.preventDefault();
+            
+            const rect = canvas.getBoundingClientRect();
+            let clientX, clientY;
+            
+            if (e.touches && e.touches.length > 0) {
+                clientX = e.touches[0].clientX; clientY = e.touches[0].clientY;
+            } else {
+                clientX = e.clientX; clientY = e.clientY;
+            }
+            
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const x = (clientX - rect.left) * scaleX;
+            const y = (clientY - rect.top) * scaleY;
+
+            ctx.lineTo(x, y);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+        }
+
+        canvas.addEventListener('mousedown', startDrawing);
+        window.addEventListener('mouseup', stopDrawing);
+        canvas.addEventListener('mousemove', draw);
+        
+        canvas.addEventListener('touchstart', startDrawing, {passive: false});
+        window.addEventListener('touchend', stopDrawing);
+        canvas.addEventListener('touchmove', draw, {passive: false});
+        
+        clearBtn.addEventListener('click', () => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            sendMask();
+        });
+
+        function onRender(event) {
+            const data = event.detail.args;
+            container.style.width = data.width + 'px';
+            container.style.height = data.height + 'px';
+            
+            if (!isReady || bg.src !== "data:image/jpeg;base64," + data.bg_base64) {
+                canvas.width = data.width;
+                canvas.height = data.height;
+                bg.src = "data:image/jpeg;base64," + data.bg_base64;
+                isReady = true;
+                Streamlit.setComponentValue("");
+            }
+            
+            ctx.strokeStyle = 'rgba(255, 50, 50, 0.7)';
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.lineWidth = data.brush_size;
+            
+            Streamlit.setFrameHeight(data.height + 45);
+        }
+
+        Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, onRender);
+        Streamlit.setComponentReady();
+    </script>
+</body>
+</html>
+"""
+
+@st.cache_resource
+def get_native_canvas():
+    """将自研的 HTML 画板编译为 Streamlit 组件"""
+    component_dir = os.path.join(tempfile.gettempdir(), "native_canvas_comp")
+    os.makedirs(component_dir, exist_ok=True)
+    with open(os.path.join(component_dir, "index.html"), "w", encoding="utf-8") as f:
+        f.write(CANVAS_HTML)
+    return components.declare_component("native_canvas", path=component_dir)
+
+native_canvas = get_native_canvas()
 
 # ==========================================
 # 🛠️ 核心辅助函数
 # ==========================================
 def pil_to_base64(pil_img, format="JPEG", quality=85):
     buffered = io.BytesIO()
+    if pil_img.mode != "RGB":
+        pil_img = pil_img.convert("RGB")
     pil_img.save(buffered, format=format, quality=quality)
     return base64.b64encode(buffered.getvalue()).decode('utf-8')
 
@@ -97,7 +254,7 @@ except KeyError:
     st.error("⚠️ 未检测到云端 Secrets，请确保已在 Advanced settings 中配置 GEMINI_API_KEY。")
     st.stop()
 
-st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v9.0")
+st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v10.0")
 st.markdown("---")
 
 tab_studio, tab_gallery = st.tabs(["🎨 局部重绘与工作室 / Inpainting Studio", "🖼️ 历史资产库 / Gallery"])
@@ -123,9 +280,9 @@ with tab_studio:
         if original_base_pil:
             inpainting_mode = st.radio(
                 "模式 / Mode",
-                ["🎨 局部重绘 (激光涂抹)", "🚀 全局渲染 (整体出图)"],
+                ["🎨 局部重绘 (自由涂抹)", "🚀 全局渲染 (整体出图)"],
                 horizontal=True,
-                help="局部重绘：修改画笔涂抹区域；全局渲染：整体风格化。"
+                help="局部重绘：修改涂抹区域；全局渲染：整体风格化。"
             )
         else:
             st.info("👈 上传图片后即可选择重绘模式")
@@ -144,11 +301,11 @@ with tab_studio:
         
         if selected_style == "✍️ 自定义 / Custom Prompt":
             if is_inpainting:
-                prompt = st.text_area("输入重绘指令 (建议英文) / Inpainting Prompt:", value="", help="描述你想要修改的内容，如：'A modern glass balcony'")
+                prompt = st.text_area("输入重绘指令 (建议英文) / Inpainting Prompt:", value="", help="描述涂抹区域生成什么，如：'A modern glass balcony'")
             else:
                 prompt = st.text_area("输入指令 (建议英文) / Global Prompt:", value="")
         elif is_inpainting:
-            st.warning("💡 预设风格将全局影响涂抹区域。如需精确控制，建议切换至『自定义』并详细描述。")
+            st.warning("💡 预设风格将全局影响涂抹区域。如需精确控制，建议切换至『自定义』并详细描述（如：'Add a minimalist tree'）。")
 
         st.subheader("3. 画幅与参数 / Settings")
         
@@ -160,6 +317,11 @@ with tab_studio:
             aspect_ratio = st.radio("📐 画幅比例", ["✨ 自动 (Auto)", "16:9", "9:16", "1:1", "4:3", "3:4"], horizontal=True)
             quality = st.radio("✨ 渲染精度", ["512 (极速)", "1K (标准)", "2K (超清)", "4K (大片)"], horizontal=True, index=1)
 
+        if is_inpainting and original_base_pil:
+            st.divider()
+            st.subheader("🖌️ 画笔工具 / Brush Tool")
+            stroke_width = st.slider("画笔粗细 / Brush Size:", 5, 100, value=30)
+
         st.markdown("<br>", unsafe_allow_html=True) 
         render_btn = st.button("🚀 开始渲染抽卡 / Generate", type="primary", use_container_width=True)
 
@@ -167,77 +329,31 @@ with tab_studio:
         st.subheader("📺 渲染视口 / Viewport")
         viewport_placeholder = st.empty()
         
-        # 准备获取虚拟画笔参数
-        brush_x, brush_y, brush_r, brush_shape = 50.0, 50.0, 10.0, "圆形"
-        
+        canvas_result = None
         if original_base_pil:
             with viewport_placeholder.container():
-                if is_inpainting:
-                    st.success("🎯 **【原生激光画笔控制台】** \n通过滑块移动绿色准星，点击『涂抹』盖章。多次涂抹可组合成复杂形状！")
+                col1, col2 = st.columns([100, 1])
+                with col1:
+                    orig_w, orig_h = original_base_pil.size
+                    max_web_w = 700
+                    scale_fac = max_web_w / orig_w if orig_w > max_web_w else 1.0
+                    web_w, web_h = int(orig_w * scale_fac), int(orig_h * scale_fac)
                     
-                    # 🌟 核心：原生虚拟画笔控制台
-                    col_shape, col_size = st.columns(2)
-                    with col_shape:
-                        brush_shape = st.radio("🖌️ 画笔形状", ["圆形", "方形"], horizontal=True)
-                    with col_size:
-                        brush_r = st.slider("📏 画笔大小 (半径 %)", 1.0, 50.0, 10.0)
+                    if is_inpainting:
+                        # 🌟 绝杀：唤醒我们自己手写的原生自由画板
+                        preview_pil = original_base_pil.resize((web_w, web_h), Image.Resampling.LANCZOS)
+                        bg_b64 = pil_to_base64(preview_pil)
                         
-                    col_x, col_y = st.columns(2)
-                    with col_x:
-                        brush_x = st.slider("↔️ 准星水平位置 (X %)", 0.0, 100.0, 50.0)
-                    with col_y:
-                        brush_y = st.slider("↕️ 准星垂直位置 (Y %)", 0.0, 100.0, 50.0)
-
-                    # 画笔操作按钮
-                    btn_col1, btn_col2, btn_col3 = st.columns(3)
-                    if btn_col1.button("🔴 涂抹当前准星区", use_container_width=True):
-                        st.session_state.mask_stamps.append((brush_shape, brush_x, brush_y, brush_r))
-                    if btn_col2.button("↩️ 撤销上一笔", use_container_width=True):
-                        if st.session_state.mask_stamps:
-                            st.session_state.mask_stamps.pop()
-                    if btn_col3.button("🗑️ 清空所有涂抹", use_container_width=True):
-                        st.session_state.mask_stamps = []
-
-                    # 动态绘制预览图：原始底图 + 红色历史涂抹 + 绿色当前准星
-                    preview_img = original_base_pil.copy()
-                    if preview_img.mode != 'RGBA':
-                        preview_img = preview_img.convert('RGBA')
-                        
-                    overlay = Image.new('RGBA', preview_img.size, (0, 0, 0, 0))
-                    draw = ImageDraw.Draw(overlay)
-                    w, h = preview_img.size
-                    
-                    # 1. 绘制历史盖章（红色填充）
-                    for shape, sx, sy, sr in st.session_state.mask_stamps:
-                        cx, cy = w * sx / 100, h * sy / 100
-                        cr_x, cr_y = w * sr / 100, w * sr / 100 # 保持比例统一用宽度的百分比
-                        box = [cx - cr_x, cy - cr_y, cx + cr_x, cy + cr_y]
-                        if shape == "圆形":
-                            draw.ellipse(box, fill=(255, 50, 50, 180))
-                        else:
-                            draw.rectangle(box, fill=(255, 50, 50, 180))
-                            
-                    # 2. 绘制当前绿色准星（空心）
-                    hx, hy = w * brush_x / 100, h * brush_y / 100
-                    hr_x, hr_y = w * brush_r / 100, w * brush_r / 100
-                    hover_box = [hx - hr_x, hy - hr_y, hx + hr_x, hy + hr_y]
-                    
-                    if brush_shape == "圆形":
-                        draw.ellipse(hover_box, outline=(0, 255, 0, 255), width=4)
+                        canvas_result = native_canvas(
+                            bg_base64=bg_b64,
+                            width=web_w,
+                            height=web_h,
+                            brush_size=stroke_width,
+                            key="inpainting_native_canvas"
+                        )
                     else:
-                        draw.rectangle(hover_box, outline=(0, 255, 0, 255), width=4)
-                        
-                    # 画个十字中心点
-                    draw.line([hx-15, hy, hx+15, hy], fill=(0, 255, 0, 255), width=3)
-                    draw.line([hx, hy-15, hx, hy+15], fill=(0, 255, 0, 255), width=3)
-                    
-                    # 合并并显示
-                    final_preview = Image.alpha_composite(preview_img, overlay)
-                    st.image(final_preview, caption="🎯 绿色为准星，红色为已涂抹的重绘区域", use_column_width=True)
-                    
-                else:
-                    st.success("✨ 当前为【全局渲染】模式，原图已在左侧就绪。请点击左下角开始渲染。")
-                    st.image(original_base_pil, caption="输入底图 / Input Base", use_column_width=True)
+                        st.success("✨ 当前为【全局渲染】模式，原图已在左侧就绪。请点击左下角开始渲染。")
+                        st.image(original_base_pil, caption="输入底图 / Input Base", use_column_width=True)
         else:
             viewport_placeholder.info("👈 请在左侧上传一张底图开始 / Upload an image to start.")
 
@@ -249,6 +365,8 @@ with tab_studio:
                 st.warning("⚠️ 请上传底图！")
             elif not prompt: 
                 st.warning("⚠️ 请输入渲染指令！")
+            elif is_inpainting and (not canvas_result or not canvas_result.startswith("data:image")):
+                st.warning("⚠️ 请先在右侧图片上**随意涂抹**你需要重绘的区域！")
             else:
                 with viewport_placeholder.container():
                     with st.spinner("💳 算力引擎运转中，大约需要 15-40 秒... / Generating..."):
@@ -272,28 +390,13 @@ with tab_studio:
                             mask_payload_64 = None
 
                             if is_inpainting:
-                                # 💡 智能补全：如果用户忘记点涂抹，就直接点生成，我们自动把当前准星当作涂抹区域
-                                stamps_to_use = st.session_state.mask_stamps.copy()
-                                if not stamps_to_use:
-                                    stamps_to_use.append((brush_shape, brush_x, brush_y, brush_r))
-                                    
-                                # 生成纯黑白蒙版给 AI
-                                w, h = base_pil_processed.size
-                                mask_pil = Image.new("L", (w, h), 0)
-                                mask_draw = ImageDraw.Draw(mask_pil)
-                                
-                                for shape, sx, sy, sr in stamps_to_use:
-                                    cx, cy = w * sx / 100, h * sy / 100
-                                    cr_x, cr_y = w * sr / 100, w * sr / 100
-                                    box = [cx - cr_x, cy - cr_y, cx + cr_x, cy + cr_y]
-                                    if shape == "圆形":
-                                        mask_draw.ellipse(box, fill=255)
-                                    else:
-                                        mask_draw.rectangle(box, fill=255)
-                                
-                                final_mask_pil = mask_pil.convert("RGB")
+                                # 提取原生画板传回的完美黑白蒙版
+                                b64_data = canvas_result.split(",")[1]
+                                mask_image_data = base64.b64decode(b64_data)
+                                raw_mask_pil = Image.open(io.BytesIO(mask_image_data)).convert("RGB")
+                                final_mask_pil = raw_mask_pil.resize(base_pil_processed.size, Image.Resampling.NEAREST)
                                 mask_payload_64 = pil_to_base64(final_mask_pil)
-                                st.toast("🛡️ 原生多层叠加蒙版生成成功！")
+                                st.toast("🛡️ 自研引擎：原生黑白蒙版提取成功！")
 
                             result = call_gemini_api(API_KEY, prompt, base_payload_64, mask_payload_64, ar_val, q_val)
 
