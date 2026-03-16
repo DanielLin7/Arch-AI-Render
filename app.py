@@ -94,7 +94,7 @@ except KeyError:
     st.error("⚠️ 未检测到云端 Secrets，请确保已在 Advanced settings 中配置 GEMINI_API_KEY。")
     st.stop()
 
-st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v6.4")
+st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v6.5")
 st.markdown("---")
 
 tab_studio, tab_gallery = st.tabs(["🎨 局部重绘与工作室 / Inpainting Studio", "🖼️ 历史资产库 / Gallery"])
@@ -111,9 +111,16 @@ with tab_studio:
         original_base_pil = None 
         
         if uploaded_file is not None:
-            original_base_pil = Image.open(io.BytesIO(uploaded_file.getvalue())).convert("RGB") 
-            # 🌟 终极修复 1：直接给网页投喂上传的原始文件，彻底绕过 PIL 渲染 Bug
-            st.image(uploaded_file, caption="原始底图 / Original Base", use_container_width=True)
+            image_bytes = uploaded_file.getvalue()
+            original_base_pil = Image.open(io.BytesIO(image_bytes)).convert("RGB") 
+            
+            # 🌟 终极防弹显示机制：无论你传多大的 4K 巨无霸，我都在内存里秒切一个纯净 JPEG 缩略图给网页看
+            # 这 100% 绕过了 Streamlit 处理超大尺寸/异常格式图片的崩溃 BUG，且不影响发给 AI 的原图画质
+            preview_pil = original_base_pil.copy()
+            preview_pil.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
+            preview_buf = io.BytesIO()
+            preview_pil.save(preview_buf, format="JPEG", quality=90)
+            st.image(preview_buf.getvalue(), caption="原始底图 / Original Base", use_container_width=True)
 
         st.subheader("2. 重绘模式与指令 / Inpainting Prompt")
         
@@ -254,7 +261,6 @@ with tab_studio:
                                 
                                 col1, col2 = st.columns([100, 1]) 
                                 with col1:
-                                    # 🌟 终极修复 2：直接投喂解码后的二进制字节，绝对不会报错！
                                     st.image(image_data, caption=f"AI 渲染成品 | {raw_ai_image.width}x{raw_ai_image.height}", use_container_width=True)
                                     with open(img_filename, "rb") as file:
                                         st.download_button("⬇️ 保存当前高清大图", data=file, file_name=os.path.basename(img_filename), mime="image/png", use_container_width=True)
@@ -292,7 +298,6 @@ with tab_studio:
                                 img_filename = save_render_result(raw_ai_4k_image, last['prompt'], last['ar_val'], "4K", "全局渲染", HISTORY_DIR)
                                 
                                 st.success(f"🎆 4K 深化圆满成功！ ({raw_ai_4k_image.width}x{raw_ai_4k_image.height})")
-                                # 🌟 终极修复 3：同样投喂二进制字节
                                 st.image(image_data, caption="4K 终极渲染", use_container_width=True)
                                 
                                 with open(img_filename, "rb") as file:
@@ -348,7 +353,6 @@ with tab_gallery:
                     except: pass
                 
                 with cols[i % 3]:
-                    # 🌟 终极修复 4：画廊直接给文件路径，让 Streamlit 自己去读硬盘
                     st.image(img_path, use_container_width=True)
                     st.caption(f"**{display_stats}**")
                     
