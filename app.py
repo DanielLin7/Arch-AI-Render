@@ -94,7 +94,7 @@ except KeyError:
     st.error("⚠️ 未检测到云端 Secrets，请确保已在 Advanced settings 中配置 GEMINI_API_KEY。")
     st.stop()
 
-st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v6.6")
+st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v6.7")
 st.markdown("---")
 
 tab_studio, tab_gallery = st.tabs(["🎨 局部重绘与工作室 / Inpainting Studio", "🖼️ 历史资产库 / Gallery"])
@@ -120,7 +120,6 @@ with tab_studio:
             preview_buf = io.BytesIO()
             preview_pil.save(preview_buf, format="JPEG", quality=90)
             
-            # 🌟 核心修复点 1：将 use_container_width 替换为合法的 use_column_width
             st.image(preview_buf.getvalue(), caption="原始底图 / Original Base", use_column_width=True)
 
         st.subheader("2. 重绘模式与指令 / Inpainting Prompt")
@@ -192,11 +191,14 @@ with tab_studio:
                         st.info("🖌️ 请在下方图片上**涂抹希望修改的区域**。确保画板动作为 'freedraw'。")
                         canvas_bg = original_base_pil.resize((web_w, web_h), Image.Resampling.LANCZOS)
                         
+                        # 🌟 核心修复 1：把背景图强制锁进保险箱，防止被 Streamlit 垃圾回收导致白板
+                        st.session_state["_canvas_bg_cache"] = canvas_bg
+                        
                         canvas_result = st_canvas(
-                            fill_color="rgba(255, 255, 255, 1.0)",
+                            fill_color="rgba(255, 0, 0, 0.5)",    # 🌟 核心修复 2：半透明红色填充
                             stroke_width=stroke_width,
-                            stroke_color="rgba(255, 255, 255, 1.0)",
-                            background_image=canvas_bg,
+                            stroke_color="rgba(255, 0, 0, 0.5)",  # 🌟 核心修复 2：半透明红色画笔，让你看清涂抹轨迹
+                            background_image=st.session_state["_canvas_bg_cache"], # 调用保险箱里的背景图
                             update_streamlit=True,
                             height=web_h,
                             width=web_w,
@@ -244,6 +246,7 @@ with tab_studio:
                             if is_inpainting:
                                 mask_rgba = canvas_result.image_data
                                 mask_pil = Image.fromarray(mask_rgba.astype('uint8'), 'RGBA')
+                                # 这个黑魔法只抓取画笔的透明度，无视画笔颜色，所以我们用红笔完全没问题
                                 binary_mask = mask_pil.split()[-1].point(lambda p: 255 if p >= 1 else 0).convert("RGB")
                                 final_mask_pil = binary_mask.resize(base_pil_processed.size, Image.Resampling.NEAREST)
                                 mask_payload_64 = pil_to_base64(final_mask_pil)
@@ -262,7 +265,6 @@ with tab_studio:
                                 
                                 col1, col2 = st.columns([100, 1]) 
                                 with col1:
-                                    # 🌟 核心修复点 2：替换为 use_column_width
                                     st.image(image_data, caption=f"AI 渲染成品 | {raw_ai_image.width}x{raw_ai_image.height}", use_column_width=True)
                                     with open(img_filename, "rb") as file:
                                         st.download_button("⬇️ 保存当前高清大图", data=file, file_name=os.path.basename(img_filename), mime="image/png", use_container_width=True)
@@ -300,7 +302,6 @@ with tab_studio:
                                 img_filename = save_render_result(raw_ai_4k_image, last['prompt'], last['ar_val'], "4K", "全局渲染", HISTORY_DIR)
                                 
                                 st.success(f"🎆 4K 深化圆满成功！ ({raw_ai_4k_image.width}x{raw_ai_4k_image.height})")
-                                # 🌟 核心修复点 3：替换为 use_column_width
                                 st.image(image_data, caption="4K 终极渲染", use_column_width=True)
                                 
                                 with open(img_filename, "rb") as file:
@@ -356,7 +357,6 @@ with tab_gallery:
                     except: pass
                 
                 with cols[i % 3]:
-                    # 🌟 核心修复点 4：替换为 use_column_width
                     st.image(img_path, use_column_width=True)
                     st.caption(f"**{display_stats}**")
                     
