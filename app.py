@@ -2,64 +2,10 @@ import streamlit as st
 import base64
 import os
 import requests
-from PIL import Image
+from PIL import Image, ImageDraw
 import io
 import datetime
 import numpy as np
-
-# ==========================================
-# 🌟 终极史诗黑魔法：全局系统级劫持 Streamlit 图片渲染引擎
-# 彻底碾碎 Iframe 跨域白板与图片崩溃的一切可能！
-# ==========================================
-import streamlit.elements.image as st_image
-
-original_image_to_url = st_image.image_to_url
-
-def robust_image_to_url(*args, **kwargs):
-    """全能型 Base64 注射器，接管整个网站的图片渲染，强制化为合法文本流"""
-    img = kwargs.get("image", args[0] if args else None)
-    
-    if img is None:
-        return original_image_to_url(*args, **kwargs)
-    
-    try:
-        # 1. 如果是字符串(URL或路径)，直接放行给原生系统
-        if isinstance(img, str):
-            return original_image_to_url(*args, **kwargs)
-        
-        # 2. 如果是二进制字节流(如上传的预览图或 AI 返回的字节图)，强转 Base64
-        if isinstance(img, (bytes, bytearray)):
-            b64_str = base64.b64encode(img).decode("utf-8")
-            return f"data:image/png;base64,{b64_str}"
-        
-        # 3. 如果是实体图片对象 (最关键！专治画板的底图白板)，强转 Base64
-        if hasattr(img, "save"):
-            buffered = io.BytesIO()
-            # 确保转为 RGB/RGBA 防止个别格式报错
-            if img.mode not in ("RGB", "RGBA"):
-                img = img.convert("RGBA")
-            img.save(buffered, format="PNG")
-            b64_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-            return f"data:image/png;base64,{b64_str}"
-            
-        # 4. 如果是 Numpy 矩阵数组，转实体图后再转 Base64
-        if isinstance(img, np.ndarray):
-            pil_img = Image.fromarray(img.astype('uint8'))
-            buffered = io.BytesIO()
-            pil_img.save(buffered, format="PNG")
-            b64_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-            return f"data:image/png;base64,{b64_str}"
-            
-    except Exception:
-        pass
-    
-    # 任何黑魔法解析失败的情况，都有原生系统保底
-    return original_image_to_url(*args, **kwargs)
-
-# 🗡️ 致命一击：强制覆盖 Streamlit 底层原生引擎！
-st_image.image_to_url = robust_image_to_url
-from streamlit_drawable_canvas import st_canvas 
-# ==========================================
 
 # ==========================================
 # 0. 页面基础配置
@@ -147,7 +93,7 @@ except KeyError:
     st.error("⚠️ 未检测到云端 Secrets，请确保已在 Advanced settings 中配置 GEMINI_API_KEY。")
     st.stop()
 
-st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v7.5")
+st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v8.0")
 st.markdown("---")
 
 tab_studio, tab_gallery = st.tabs(["🎨 局部重绘与工作室 / Inpainting Studio", "🖼️ 历史资产库 / Gallery"])
@@ -166,23 +112,16 @@ with tab_studio:
         if uploaded_file is not None:
             image_bytes = uploaded_file.getvalue()
             original_base_pil = Image.open(io.BytesIO(image_bytes)).convert("RGB") 
-            
-            # 高效预览防崩溃
-            preview_pil = original_base_pil.copy()
-            preview_pil.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
-            preview_buf = io.BytesIO()
-            preview_pil.save(preview_buf, format="JPEG", quality=90)
-            
-            st.image(preview_buf.getvalue(), caption="原始底图 / Original Base", use_column_width=True)
+            st.image(original_base_pil, caption="原始底图 / Original Base", use_column_width=True)
 
         st.subheader("2. 重绘模式与指令 / Inpainting Prompt")
         
         if original_base_pil:
             inpainting_mode = st.radio(
                 "模式 / Mode",
-                ["🎨 局部重绘 (涂抹修改)", "🚀 全局渲染 (整体出图)"],
+                ["🎨 局部重绘 (框选修改)", "🚀 全局渲染 (整体出图)"],
                 horizontal=True,
-                help="局部重绘：修改涂抹区域；全局渲染：整体风格化。"
+                help="局部重绘：修改红框区域；全局渲染：整体风格化。"
             )
         else:
             st.info("👈 上传图片后即可选择重绘模式")
@@ -201,11 +140,11 @@ with tab_studio:
         
         if selected_style == "✍️ 自定义 / Custom Prompt":
             if is_inpainting:
-                prompt = st.text_area("输入重绘指令 (建议英文) / Inpainting Prompt:", value="", help="描述涂抹区域生成什么，如：'A modern glass balcony'")
+                prompt = st.text_area("输入重绘指令 (建议英文) / Inpainting Prompt:", value="", help="描述框选区域生成什么，如：'A modern glass balcony'")
             else:
                 prompt = st.text_area("输入指令 (建议英文) / Global Prompt:", value="")
         elif is_inpainting:
-            st.warning("💡 预设风格将全局影响涂抹区域。如需精确控制，建议切换至『自定义』并详细描述（如：'Add a minimalist tree'）。")
+            st.warning("💡 预设风格将全局影响框选区域。如需精确控制，建议切换至『自定义』并详细描述（如：'Add a minimalist tree'）。")
 
         st.subheader("3. 画幅与参数 / Settings")
         
@@ -217,13 +156,6 @@ with tab_studio:
             aspect_ratio = st.radio("📐 画幅比例", ["✨ 自动 (Auto)", "16:9", "9:16", "1:1", "4:3", "3:4"], horizontal=True)
             quality = st.radio("✨ 渲染精度", ["512 (极速)", "1K (标准)", "2K (超清)", "4K (大片)"], horizontal=True, index=1)
 
-        if is_inpainting and original_base_pil:
-            st.divider()
-            st.subheader("🖌️ 画笔工具 / Brush Tool")
-            stroke_width = st.slider("画笔粗细 / Brush Size:", 5, 100, value=25)
-            drawing_mode = st.selectbox("动作 / Action:", ["freedraw (自由涂抹)", "transform (移动画布)"], index=0)
-            drawing_mode_safe = "freedraw" if "freedraw" in drawing_mode else "transform"
-
         st.markdown("<br>", unsafe_allow_html=True) 
         render_btn = st.button("🚀 开始渲染抽卡 / Generate", type="primary", use_container_width=True)
 
@@ -231,34 +163,45 @@ with tab_studio:
         st.subheader("📺 渲染视口 / Viewport")
         viewport_placeholder = st.empty()
         
+        # 保存框选的坐标范围
+        x_range = (0.0, 100.0)
+        y_range = (0.0, 100.0)
+        
         if original_base_pil:
             with viewport_placeholder.container():
-                col1, col2 = st.columns([100, 1])
-                with col1:
-                    orig_w, orig_h = original_base_pil.size
-                    max_web_w = 700
-                    scale_fac = max_web_w / orig_w if orig_w > max_web_w else 1.0
-                    web_w, web_h = int(orig_w * scale_fac), int(orig_h * scale_fac)
+                if is_inpainting:
+                    st.info("🎯 请调整下方滑块，框选你需要重绘的区域。")
                     
-                    if is_inpainting:
-                        st.info("🖌️ 请在下方图片上**涂抹希望修改的区域**。确保画板动作为 'freedraw'。")
+                    # 🌟 原生滑块：彻底抛弃画板，用百分比滑块定义区域
+                    col_slider1, col_slider2 = st.columns(2)
+                    with col_slider1:
+                        x_range = st.slider("↔️ 水平重绘范围 (X轴 %)", 0.0, 100.0, (30.0, 70.0), help="左侧和右侧的边界")
+                    with col_slider2:
+                        y_range = st.slider("↕️ 垂直重绘范围 (Y轴 %)", 0.0, 100.0, (30.0, 70.0), help="顶部和底部的边界")
+
+                    # 动态绘制带红框的预览图
+                    preview_img = original_base_pil.copy()
+                    if preview_img.mode != 'RGBA':
+                        preview_img = preview_img.convert('RGBA')
                         
-                        raw_bg = original_base_pil.resize((web_w, web_h), Image.Resampling.LANCZOS).convert("RGBA")
-                        
-                        canvas_result = st_canvas(
-                            fill_color="rgba(255, 0, 0, 0.5)",
-                            stroke_width=stroke_width,
-                            stroke_color="rgba(255, 0, 0, 0.5)",
-                            background_image=raw_bg,
-                            update_streamlit=True,
-                            height=web_h,
-                            width=web_w,
-                            drawing_mode=drawing_mode_safe,
-                            key="inpainting_canvas",
-                        )
-                    else:
-                        st.success("✨ 当前为【全局渲染】模式，原图已在左侧就绪。请点击左下角开始渲染。")
-                        canvas_result = None
+                    # 创建一个透明的涂层用来画红框
+                    overlay = Image.new('RGBA', preview_img.size, (0, 0, 0, 0))
+                    draw = ImageDraw.Draw(overlay)
+                    
+                    w, h = preview_img.size
+                    x1, x2 = w * x_range[0] / 100, w * x_range[1] / 100
+                    y1, y2 = h * y_range[0] / 100, h * y_range[1] / 100
+                    
+                    # 画一个半透明的红框
+                    draw.rectangle([x1, y1, x2, y2], fill=(255, 50, 50, 120), outline=(255, 0, 0, 255), width=3)
+                    
+                    # 合并原图和红框涂层
+                    final_preview = Image.alpha_composite(preview_img, overlay)
+                    
+                    st.image(final_preview, caption="🎯 红色高亮区域即为 AI 重绘范围", use_column_width=True)
+                else:
+                    st.success("✨ 当前为【全局渲染】模式，原图已在左侧就绪。请点击左下角开始渲染。")
+                    st.image(original_base_pil, caption="输入底图 / Input Base", use_column_width=True)
         else:
             viewport_placeholder.info("👈 请在左侧上传一张底图开始 / Upload an image to start.")
 
@@ -270,8 +213,6 @@ with tab_studio:
                 st.warning("⚠️ 请上传底图！")
             elif not prompt: 
                 st.warning("⚠️ 请输入渲染指令！")
-            elif is_inpainting and (canvas_result is None or canvas_result.image_data is None or not np.any(canvas_result.image_data > 0)):
-                st.warning("⚠️ 请先在右侧图片上**涂抹你需要重绘的区域**！")
             else:
                 with viewport_placeholder.container():
                     with st.spinner("💳 算力引擎运转中，大约需要 15-40 秒... / Generating..."):
@@ -295,12 +236,20 @@ with tab_studio:
                             mask_payload_64 = None
 
                             if is_inpainting:
-                                mask_rgba = canvas_result.image_data
-                                mask_pil = Image.fromarray(mask_rgba.astype('uint8'), 'RGBA')
-                                binary_mask = mask_pil.split()[-1].point(lambda p: 255 if p >= 1 else 0).convert("RGB")
-                                final_mask_pil = binary_mask.resize(base_pil_processed.size, Image.Resampling.NEAREST)
+                                # 🌟 根据滑块数值，动态生成纯净的黑白蒙版！
+                                w, h = base_pil_processed.size
+                                m_x1, m_x2 = w * x_range[0] / 100, w * x_range[1] / 100
+                                m_y1, m_y2 = h * y_range[0] / 100, h * y_range[1] / 100
+                                
+                                # 生成纯黑背景
+                                mask_pil = Image.new("L", (w, h), 0)
+                                mask_draw = ImageDraw.Draw(mask_pil)
+                                # 画出纯白色的重绘区域
+                                mask_draw.rectangle([m_x1, m_y1, m_x2, m_y2], fill=255)
+                                
+                                final_mask_pil = mask_pil.convert("RGB")
                                 mask_payload_64 = pil_to_base64(final_mask_pil)
-                                st.toast("🛡️ 压缩引擎与蒙版通道就绪！")
+                                st.toast("🛡️ 100% 原生框选蒙版生成成功！")
 
                             result = call_gemini_api(API_KEY, prompt, base_payload_64, mask_payload_64, ar_val, q_val)
 
@@ -315,7 +264,7 @@ with tab_studio:
                                 
                                 col1, col2 = st.columns([100, 1]) 
                                 with col1:
-                                    st.image(image_data, caption=f"AI 渲染成品 | {raw_ai_image.width}x{raw_ai_image.height}", use_column_width=True)
+                                    st.image(raw_ai_image, caption=f"AI 渲染成品 | {raw_ai_image.width}x{raw_ai_image.height}", use_column_width=True)
                                     with open(img_filename, "rb") as file:
                                         st.download_button("⬇️ 保存当前高清大图", data=file, file_name=os.path.basename(img_filename), mime="image/png", use_container_width=True)
                                 
@@ -352,7 +301,7 @@ with tab_studio:
                                 img_filename = save_render_result(raw_ai_4k_image, last['prompt'], last['ar_val'], "4K", "全局渲染", HISTORY_DIR)
                                 
                                 st.success(f"🎆 4K 深化圆满成功！ ({raw_ai_4k_image.width}x{raw_ai_4k_image.height})")
-                                st.image(image_data, caption="4K 终极渲染", use_column_width=True)
+                                st.image(raw_ai_4k_image, caption="4K 终极渲染", use_column_width=True)
                                 
                                 with open(img_filename, "rb") as file:
                                     st.download_button("⬇️ 保存 4K 极限大图", data=file, file_name=os.path.basename(img_filename), mime="image/png", type="primary", use_container_width=True)
