@@ -8,7 +8,7 @@ import datetime
 import numpy as np
 
 # ==========================================
-# 🌟 终极破壁黑魔法：全局劫持画板底层的 URL 生成器
+# 🌟 终极破壁黑魔法：全局劫持画板底层的 URL 生成器 (智能防弹版)
 # 彻底解决 Streamlit Cloud Iframe 跨域导致底图白板的世纪难题
 # ==========================================
 import streamlit_drawable_canvas
@@ -18,11 +18,24 @@ def b64_image_to_url(*args, **kwargs):
     img = args[0] if args else kwargs.get("image")
     if img is None:
         return ""
-    buffered = io.BytesIO()
-    # 强制用 PNG 格式保留完整通道
-    img.save(buffered, format="PNG")
-    b64_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-    return f"data:image/png;base64,{b64_str}"
+        
+    # 🛡️ 智能判断 1：如果传入的已经是二进制代码 (bytes)，直接编码放行！
+    if isinstance(img, (bytes, bytearray)):
+        b64_str = base64.b64encode(img).decode("utf-8")
+        return f"data:image/jpeg;base64,{b64_str}"
+        
+    # 🛡️ 智能判断 2：如果是字符串 (比如画廊里的图片路径)，直接原样返回给浏览器读取
+    if isinstance(img, str):
+        return img
+        
+    # 🛡️ 智能判断 3：如果是 PIL 图片实体 (画板底图)，使用黑魔法强制转码注入
+    try:
+        buffered = io.BytesIO()
+        img.save(buffered, format="PNG")
+        b64_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+        return f"data:image/png;base64,{b64_str}"
+    except Exception:
+        return ""
 
 # ⚡ 史诗级修复：精准定位画板插件内部的别名 (st_image) 并替换！
 if hasattr(streamlit_drawable_canvas, "st_image"):
@@ -117,7 +130,7 @@ except KeyError:
     st.error("⚠️ 未检测到云端 Secrets，请确保已在 Advanced settings 中配置 GEMINI_API_KEY。")
     st.stop()
 
-st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v7.2")
+st.title("🏗️ 建筑 AI 渲染引擎 PRO / Architecture AI Render PRO v7.3")
 st.markdown("---")
 
 tab_studio, tab_gallery = st.tabs(["🎨 局部重绘与工作室 / Inpainting Studio", "🖼️ 历史资产库 / Gallery"])
