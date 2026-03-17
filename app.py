@@ -496,8 +496,8 @@ with tab_studio:
                     with st.spinner("💳 4K 深化算力运转中，请耐心等待 1-2 分钟..."):
                         try:
                             last = st.session_state['last_render']
-                            # 引入“无损深化咒语”，禁止 AI 发散想象改变原图结构
-                            upscale_prompt = f"Absolutely maintain the exact same composition, structure, and content of the base image. Do not change the design. Only enhance the resolution, add photorealistic details, and upscale to 4K high quality architectural rendering. Theme: {last['prompt']}"
+                            # 🌟 核心修复：彻底抛弃旧的重绘提示词！使用最严厉的“纯粹提升”咒语锁定原图结构
+                            upscale_prompt = "Masterpiece, 8k resolution, highly detailed, photorealistic architectural photography. Strictly maintain the exact same composition, geometry, and content of the provided image. Do NOT alter the design, do NOT add or remove features. Only enhance the resolution, textures, materials, and lighting."
                             
                             result = call_gemini_api(API_KEY, upscale_prompt, last['output_b64'], mask_b64=None, aspect_ratio=last['ar_val'], image_size="4K")
 
@@ -616,8 +616,8 @@ with tab_gallery:
                                                 safe_img.thumbnail((2048, 2048), Image.Resampling.LANCZOS)
                                             history_b64 = pil_to_base64(safe_img)
                                         
-                                        # 引入“无损深化咒语”，禁止 AI 发散想象改变原图结构
-                                        upscale_prompt = f"Absolutely maintain the exact same composition, structure, and content of the base image. Do not change the design. Only enhance the resolution, add photorealistic details, and upscale to 4K high quality architectural rendering. Theme: {saved_prompt}"
+                                        # 🌟 核心修复：画廊同样使用纯净的无损深化咒语
+                                        upscale_prompt = "Masterpiece, 8k resolution, highly detailed, photorealistic architectural photography. Strictly maintain the exact same composition, geometry, and content of the provided image. Do NOT alter the design, do NOT add or remove features. Only enhance the resolution, textures, materials, and lighting."
                                         
                                         result = call_gemini_api(API_KEY, upscale_prompt, history_b64, mask_b64=None, aspect_ratio=saved_ar, image_size="4K")
                                         
