@@ -415,17 +415,15 @@ with tab_studio:
                 with viewport_placeholder.container():
                     with st.spinner("💳 算力引擎运转中，大约需要 15-40 秒... / Generating..."):
                         try:
-                            # 🌟 尊重用户的画质选项，不再强制重置为 2K，解决画廊精度显示错位问题
+                            # 🌟 核心修复 3：精准过滤比例选项，防止把 "✨ 自动" 的特殊符号传给大模型引发 400 崩溃！
                             q_val = quality.split(" ")[0]
-                            if is_inpainting:
-                                ar_val = "自动"
-                            else:
-                                ar_val = aspect_ratio.split(" ")[0]
                             
                             img_w, img_h = original_base_pil.size
-                            if "自动" in ar_val:
+                            if is_inpainting or "自动" in aspect_ratio:
                                 ratios = {"16:9": 16/9, "9:16": 9/16, "1:1": 1.0, "4:3": 4/3, "3:4": 3/4}
                                 ar_val = min(ratios, key=lambda k: abs(ratios[k] - (img_w / img_h)))
+                            else:
+                                ar_val = aspect_ratio
                             
                             base_pil_processed = original_base_pil.copy()
                             if base_pil_processed.width > 2048 or base_pil_processed.height > 2048:
